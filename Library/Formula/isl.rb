@@ -1,18 +1,57 @@
-require 'formula'
-
 class Isl < Formula
-  homepage 'http://www.kotnet.org/~skimo/isl/'
-  # Swapped the url & mirror
-  url 'ftp://ftp.linux.student.kuleuven.be/pub/people/skimo/isl/isl-0.11.2.tar.bz2'
-  mirror 'http://www.kotnet.org/~skimo/isl/isl-0.11.2.tar.bz2'
-  sha1 'ca2c93a58e899379d39f2956b2299c62e3975018'
+  desc "Integer Set Library for the polyhedral model"
+  homepage "http://freecode.com/projects/isl"
+  # Note: Always use tarball instead of git tag for stable version.
+  #
+  # Currently isl detects its version using source code directory name
+  # and update isl_version() function accordingly.  All other names will
+  # result in isl_version() function returning "UNKNOWN" and hence break
+  # package detection.
+  url "http://isl.gforge.inria.fr/isl-0.14.1.tar.xz"
+  sha256 "8882c9e36549fc757efa267706a9af733bb8d7fe3905cbfde43e17a89eea4675"
 
-  head 'http://repo.or.cz/w/isl.git'
+  bottle do
+    cellar :any
+    revision 3
+    sha256 "8f2930559c015c477a094e67f2f70aff8ef0fb37296432e95921569fa9080db9" => :yosemite
+    sha256 "835d04dc9d6be86f7480b31824522ece83895ec0ed78314caf900c4bfd5611fa" => :mavericks
+    sha256 "19f797f8031bd373bb13a61ceefd9d74ee74cca0af1790617020f8a951ae8ce2" => :mountain_lion
+  end
 
-  depends_on 'gmp'
+  head do
+    url "http://repo.or.cz/r/isl.git"
+
+    depends_on "autoconf" => :build
+    depends_on "automake" => :build
+    depends_on "libtool" => :build
+  end
+
+  depends_on "gmp"
 
   def install
-    system "./configure", "--disable-dependency-tracking", "--prefix=#{prefix}"
-    system "make install"
+    system "./autogen.sh" if build.head?
+    system "./configure", "--disable-dependency-tracking",
+                          "--disable-silent-rules",
+                          "--prefix=#{prefix}",
+                          "--with-gmp=system",
+                          "--with-gmp-prefix=#{Formula["gmp"].opt_prefix}"
+    system "make"
+    system "make", "install"
+    (share/"gdb/auto-load").install Dir["#{lib}/*-gdb.py"]
+  end
+
+  test do
+    (testpath/"test.c").write <<-EOS.undent
+      #include <isl/ctx.h>
+
+      int main()
+      {
+        isl_ctx* ctx = isl_ctx_alloc();
+        isl_ctx_free(ctx);
+        return 0;
+      }
+    EOS
+    system ENV.cc, "test.c", "-lisl", "-o", "test"
+    system "./test"
   end
 end

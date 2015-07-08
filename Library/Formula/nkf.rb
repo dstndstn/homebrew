@@ -1,59 +1,21 @@
-require 'formula'
-
 class Nkf < Formula
-  homepage 'http://sourceforge.jp/projects/nkf/'
-  url 'http://dl.sourceforge.jp/nkf/53171/nkf-2.1.2.tar.gz'
-  sha1 'ca301d84e57787f566c933c2a1511f600183c8f1'
+  desc "Network Kanji code conversion Filter (NKF)"
+  homepage "https://osdn.jp/projects/nkf/"
+  url "http://dl.osdn.jp/nkf/59912/nkf-2.1.3.tar.gz"
+  sha256 "8cb430ae69a1ad58b522eb4927b337b5b420bbaeb69df255919019dc64b72fc2"
 
-  def patches
-    # Makefile patch
-    DATA
+  bottle do
+    cellar :any
+    sha1 "ebad3eb906da012ffc5c1167fdc9d75221471394" => :yosemite
+    sha1 "779ab5fa155cba57c42cd877beafa980c2ebccff" => :mavericks
+    sha1 "760761c7977133b623449c75631019a23186ad3d" => :mountain_lion
   end
 
   def install
-    ENV['prefix'] = prefix
-    system 'make'
-    system 'make install'
+    inreplace "Makefile", "$(prefix)/man", "$(prefix)/share/man"
+    system "make", "CC=#{ENV.cc}"
+    # Have to specify mkdir -p here since the intermediate directories
+    # don't exist in an empty prefix
+    system "make", "install", "prefix=#{prefix}", "MKDIR=mkdir -p"
   end
 end
-
-__END__
-diff --git a/Makefile b/Makefile
---- a/Makefile
-+++ b/Makefile
-@@ -1,4 +1,4 @@
--CC = cc
-+#CC = cc
- CFLAGS = -g -O2 -Wall -pedantic
- # CFLAGS = -O3
- SHAR = shar 
-@@ -7,7 +7,7 @@
- RM = rm -rf
- VERSION = 2.1.2
- MKDIR = mkdir
--prefix = /usr/local
-+#prefix = /usr/local
- 
- .PHONY: clean install test tar shar
- 
-@@ -35,13 +35,14 @@
- 
- install:
- 	-$(MKDIR) $(prefix)/bin
--	-$(MKDIR) $(prefix)/man
--	-$(MKDIR) $(prefix)/man/man1
--	-$(MKDIR) $(prefix)/man/ja
--	-$(MKDIR) $(prefix)/man/ja/man1
-+	-$(MKDIR) $(prefix)/share
-+	-$(MKDIR) $(prefix)/share/man
-+	-$(MKDIR) $(prefix)/share/man/man1
-+	-$(MKDIR) $(prefix)/share/man/ja
-+	-$(MKDIR) $(prefix)/share/man/ja/man1
- 	cp -f nkf $(prefix)/bin/
--	cp -f nkf.1 $(prefix)/man/man1/
--	cp -f nkf.1j $(prefix)/man/ja/man1/nkf.1
-+	cp -f nkf.1 $(prefix)/share/man/man1/
-+	cp -f nkf.1j $(prefix)/share/man/ja/man1/nkf.1
- 
- shar:
- 	-mkdir nkf-$(VERSION)

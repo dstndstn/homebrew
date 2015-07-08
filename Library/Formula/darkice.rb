@@ -1,9 +1,10 @@
 require 'formula'
 
 class Darkice < Formula
+  desc "Live audio streamer"
   homepage 'http://code.google.com/p/darkice/'
-  url 'http://darkice.googlecode.com/files/darkice-1.1.tar.gz'
-  sha1 '8379670b477ce72beabd3a2d920ee880f69d7a30'
+  url 'https://darkice.googlecode.com/files/darkice-1.2.tar.gz'
+  sha1 '508eb0560a7cdf0990a8793f4b8d324ae74bc343'
 
   head 'http://darkice.googlecode.com/svn/darkice/branches/darkice-macosx'
 

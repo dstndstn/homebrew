@@ -1,6 +1,7 @@
 require 'formula'
 
 class YazeAg < Formula
+  desc "Yet Another Z80 Emulator (by AG)"
   homepage 'http://www.mathematik.uni-ulm.de/users/ag/yaze-ag/'
   url 'http://www.mathematik.uni-ulm.de/users/ag/yaze-ag/devel/yaze-ag-2.30.1.tar.gz'
   sha1 'c8ef40ebef4daab20ee38aae28293b6a9776c99f'
@@ -8,10 +9,8 @@ class YazeAg < Formula
   # Fix missing sys header include for caddr_t on Mac OS
   # Fix omission of creating bin directory by custom Makefile
   # Upstream author is aware of this issue:
-  # https://github.com/mxcl/homebrew/pull/16817
-  def patches
-    DATA
-  end
+  # https://github.com/Homebrew/homebrew/pull/16817
+  patch :DATA
 
   def install
     system "make", "-f", "Makefile_solaris_gcc",

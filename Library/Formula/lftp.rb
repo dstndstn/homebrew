@@ -1,45 +1,29 @@
-require 'formula'
+require "formula"
 
 class Lftp < Formula
-  homepage 'http://lftp.yar.ru/'
-  url 'http://ftp.yar.ru/pub/source/lftp/lftp-4.4.8.tar.bz2'
-  mirror 'ftp://ftp.cs.tu-berlin.de/pub/net/ftp/lftp/lftp-4.4.8.tar.bz2'
-  sha1 'c825849d90b8132ed43ea5b73fdbb6a63f3e44de'
+  desc "Sophisticated file transfer program"
+  homepage "http://lftp.yar.ru/"
+  url "http://lftp.yar.ru/ftp/lftp-4.6.3a.tar.xz"
+  sha256 "8c3a12a1f9ec288132b245bdd7d14d88ade1aa5cb1c14bb68c8fab3b68793840"
 
-  # https://github.com/mxcl/homebrew/issues/18749
-  env :std
-
-  depends_on 'pkg-config' => :build
-  depends_on 'readline'
-  depends_on 'gnutls'
-
-  # Hotfix for compiling on Snow Leopard; check if still needed in next release
-  # https://github.com/mxcl/homebrew/pull/20435
-  # http://comments.gmane.org/gmane.network.lftp.user/2253
-  def patches
-    DATA
+  bottle do
+    sha256 "5f939d210823658f99f455b76250aac59e4db8a02673f3ec69087cf4a61ea20b" => :yosemite
+    sha256 "d5f13cc616fb5d3346fc83a15ec3c6185e00aba6964c6c755b520b1f8367a973" => :mavericks
+    sha256 "7ad557cfbebbe54ac6e7c017aa183752b6ae9bbf9939231b2a403feaf297be6b" => :mountain_lion
   end
+
+  depends_on "pkg-config" => :build
+  depends_on "readline"
+  depends_on "openssl"
 
   def install
-    # Bus error
-    # TODO what are the more specific circumstances?
-    ENV.no_optimization if MacOS.version <= :leopard
-
     system "./configure", "--disable-dependency-tracking",
-                          "--prefix=#{prefix}"
-    system "make install"
+                          "--prefix=#{prefix}",
+                          "--with-openssl=#{Formula["openssl"].opt_prefix}"
+    system "make", "install"
+  end
+
+  test do
+    system "#{bin}/lftp", "-c", "open ftp://mirrors.kernel.org; ls"
   end
 end
-
-__END__
-diff --git a/src/buffer_zlib.cc b/src/buffer_zlib.cc
-index 2ceaee9..ef79e6f 100644
---- a/src/buffer_zlib.cc
-+++ b/src/buffer_zlib.cc
-@@ -87,5 +87,5 @@ DataInflator::~DataInflator()
- }
- void DataInflator::ResetTranslation()
- {
--   z_err = inflateReset2(&z, 16+MAX_WBITS);
-+   z_err = inflateReset(&z);
- }

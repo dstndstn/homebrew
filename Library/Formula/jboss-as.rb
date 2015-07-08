@@ -1,6 +1,7 @@
 require 'formula'
 
 class JbossAs < Formula
+  desc "JBoss Application Server"
   homepage 'http://www.jboss.org/jbossas'
   url 'http://download.jboss.org/jbossas/7.1/jboss-as-7.1.1.Final/jboss-as-7.1.1.Final.tar.gz'
   version '7.1.1.Final'
@@ -13,10 +14,10 @@ class JbossAs < Formula
 
   def caveats; <<-EOS.undent
     The home of JBoss Application Server 7 is:
-      #{opt_prefix}/libexec
+      #{opt_libexec}
 
     You may want to add the following to your .bash_profile:
-      export JBOSS_HOME=#{opt_prefix}/libexec
+      export JBOSS_HOME=#{opt_libexec}
       export PATH=${PATH}:${JBOSS_HOME}/bin
 
     Note: The support scripts used by JBoss Application Server 7 have

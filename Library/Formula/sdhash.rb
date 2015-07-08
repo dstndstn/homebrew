@@ -1,6 +1,7 @@
 require 'formula'
 
 class Sdhash < Formula
+  desc "Tool for correlating binary blobs of data"
   homepage 'http://roussev.net/sdhash/sdhash.html'
   url 'http://roussev.net/sdhash/releases/packages/sdhash-3.1.tar.gz'
   sha1 '0539d05a9c68aee509ca2d2dee30e5067dc211d0'
@@ -16,7 +17,7 @@ class Sdhash < Formula
     man1.install Dir['man/*.1']
   end
 
-  def test
+  test do
     system "#{bin}/sdhash"
   end
 end

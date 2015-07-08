@@ -1,6 +1,7 @@
 require 'formula'
 
 class Yap < Formula
+  desc "Prolog compiler designed for performance and extensibility"
   homepage 'http://www.dcc.fc.up.pt/~vsc/Yap/index.html'
   url 'http://www.dcc.fc.up.pt/~vsc/Yap/yap-6.2.2.tar.gz'
   sha1 'a02f80cac67c287645b2ced9502f5ea24a07f1c3'
@@ -14,23 +15,19 @@ class Yap < Formula
   depends_on 'readline'
 
   fails_with :clang do
-    cause "Undefined symbols linking for architecture x86_64"
+    cause "uses variable-length arrays in structs, which will never be supported by clang"
   end
 
   def install
-    system "./configure", "--disable-debug", "--disable-dependency-tracking",
-                          "--enable-tabling",
+    system "./configure", "--enable-tabling",
                           "--enable-depth-limit",
                           "--enable-coroutining",
                           "--enable-threads",
                           "--enable-pthread-locking",
-                          "--enable-clpbn-bp=no",
-                          "--with-gmp=#{Formula.factory('gmp').opt_prefix}",
-                          "--with-readline=#{Formula.factory('readline').opt_prefix}",
+                          "--with-gmp=#{Formula['gmp'].opt_prefix}",
+                          "--with-readline=#{Formula['readline'].opt_prefix}",
                           "--with-java=/Library/Java/Home",
                           "--prefix=#{prefix}"
-
-    inreplace 'Makefile', '-DMYDDAS_ODBC', ''
 
     system "make"
     system "make install"

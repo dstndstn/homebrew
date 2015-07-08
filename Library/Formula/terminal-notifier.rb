@@ -1,43 +1,33 @@
-require 'formula'
-
 class TerminalNotifier < Formula
-  homepage 'https://github.com/alloy/terminal-notifier'
-  url 'https://github.com/alloy/terminal-notifier/archive/1.4.2.tar.gz'
-  sha1 'eaa201650be05ff10aecde03df7f0acb161eefd8'
+  desc "Send OS X User Notifications from the command-line"
+  homepage "https://github.com/alloy/terminal-notifier"
+  url "https://github.com/alloy/terminal-notifier/archive/1.6.3.tar.gz"
+  sha256 "d71243e194d290e873eb5c5f30904e1d9406246d089e7d4d48ca275a8abfe275"
 
-  head 'https://github.com/alloy/terminal-notifier.git'
+  head "https://github.com/alloy/terminal-notifier.git"
+
+  bottle do
+    cellar :any
+    sha256 "748aefaf06e506a51274395f600fff007d6dde927f0bc1911f3b83cc8e854928" => :yosemite
+    sha256 "6609dfdb1840dfff23420a39220ba5e2eade7841b66ab167c3924c5be4f05248" => :mavericks
+    sha256 "87e1ddf62740069b8fc35ae4c302f46ecb7c2c0cf32ff5ec8ffd6cdd9611e53e" => :mountain_lion
+  end
 
   depends_on :macos => :mountain_lion
-  depends_on :xcode
-
-  def patches
-    # Disable code signing because we don't have the cert of the dev.
-    DATA
-  end
+  depends_on :xcode => :build
 
   def install
-    system 'xcodebuild', "-project", "Terminal Notifier.xcodeproj",
-                         "-target", "terminal-notifier",
-                         "SYMROOT=build",
-                         "-verbose"
-    prefix.install Dir['build/Release/*']
+    xcodebuild "-project", "Terminal Notifier.xcodeproj",
+               "-target", "terminal-notifier",
+               "SYMROOT=build",
+               "-verbose"
+    prefix.install Dir["build/Release/*"]
     inner_binary = "#{prefix}/terminal-notifier.app/Contents/MacOS/terminal-notifier"
     bin.write_exec_script inner_binary
-    chmod 0755, Pathname.new(bin+"terminal-notifier")
+    chmod 0755, bin/"terminal-notifier"
   end
 
+  test do
+    system "#{bin}/terminal-notifier", "-help" if MacOS.version < :yosemite
+  end
 end
-
-__END__
-diff --git a/Terminal Notifier.xcodeproj/project.pbxproj b/Terminal Notifier.xcodeproj/project.pbxproj
-index 163020e..bc0597e 100644
---- a/Terminal Notifier.xcodeproj/project.pbxproj	
-+++ b/Terminal Notifier.xcodeproj/project.pbxproj	
-@@ -275,7 +275,6 @@
- 		5199793415B1F92B003AFC57 /* Release */ = {
- 			isa = XCBuildConfiguration;
- 			buildSettings = {
--				CODE_SIGN_IDENTITY = "Developer ID Application: Fingertips B.V.";
- 				COMBINE_HIDPI_IMAGES = YES;
- 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
- 				GCC_PREFIX_HEADER = "Terminal Notifier/Terminal Notifier-Prefix.pch";

@@ -1,6 +1,7 @@
 require 'formula'
 
 class Qtplay < Formula
+  desc "Play audio CDs, MP3s, and other music files"
   homepage 'https://sites.google.com/site/rainbowflight2/'
   url 'https://sites.google.com/site/rainbowflight2/qtplay1.3.1.tar.gz'
   sha1 'fd7394675c972377a48c2ff8e0a774853c0be6a3'
@@ -12,7 +13,7 @@ class Qtplay < Formula
     man1.install 'qtplay.1'
   end
 
-  def test
+  test do
     system "#{bin}/qtplay", "--help"
   end
 end

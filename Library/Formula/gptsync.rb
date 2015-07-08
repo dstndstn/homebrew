@@ -1,8 +1,9 @@
 require 'formula'
 
 class Gptsync < Formula
+  desc "GPT and MBR partition tables synchronization tool"
   homepage 'http://refit.sourceforge.net/'
-  url 'http://downloads.sourceforge.net/refit/refit-src-0.14.tar.gz'
+  url 'https://downloads.sourceforge.net/refit/refit-src-0.14.tar.gz'
   sha1 'ea80a6517c1b0ce5c92c8a605a40309e2e5a9cc2'
 
   def install

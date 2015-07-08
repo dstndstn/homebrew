@@ -1,8 +1,9 @@
 require 'formula'
 
 class Dsocks < Formula
+  desc "SOCKS client wrapper for *BSD/OS X"
   homepage 'http://monkey.org/~dugsong/dsocks/'
-  url 'http://dsocks.googlecode.com/files/dsocks-1.8.tar.gz'
+  url 'https://dsocks.googlecode.com/files/dsocks-1.8.tar.gz'
   sha1 'd9d58e0ed6ca766841c94b5d15dd268a967c60bc'
 
   def install

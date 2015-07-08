@@ -1,14 +1,25 @@
-require 'formula'
-
 class Dnsmasq < Formula
-  homepage 'http://www.thekelleys.org.uk/dnsmasq/doc.html'
-  url 'http://www.thekelleys.org.uk/dnsmasq/dnsmasq-2.66.tar.gz'
-  sha256 '36232fa23d1a8efc6f84a29da5ff829c2aa40df857b9116a9320ea37b651a982'
+  desc "Lightweight DNS forwarder and DHCP server"
+  homepage "http://www.thekelleys.org.uk/dnsmasq/doc.html"
+  url "http://www.thekelleys.org.uk/dnsmasq/dnsmasq-2.73.tar.gz"
+  sha256 "9f350f74ae2c7990b1c7c6c8591d274c37b674aa987f54dfee7ca856fae0d02d"
 
-  option 'with-idn', 'Compile with IDN support'
+  bottle do
+    cellar :any
+    revision 1
+    sha256 "7d0589f5a6b4c6addcf62a9f766291753514ade66550b2c582d98662e925fd68" => :yosemite
+    sha256 "63a5a949e45b0226352c60d8436a1088aadf3e94bd699eb41fdd8bac5ae6199e" => :mavericks
+    sha256 "8f79b99434415fde4f10583ecc29a32fc57f26f65b7ebe7725c8b23277ad2acb" => :mountain_lion
+  end
 
-  depends_on "libidn" if build.include? 'with-idn'
-  depends_on 'pkg-config' => :build
+  option "with-libidn", "Compile with IDN support"
+  option "with-dnssec", "Compile with DNSSEC support"
+
+  deprecated_option "with-idn" => "with-libidn"
+
+  depends_on "pkg-config" => :build
+  depends_on "libidn" => :optional
+  depends_on "nettle" if build.with? "dnssec"
 
   def install
     ENV.deparallelize
@@ -17,8 +28,13 @@ class Dnsmasq < Formula
     inreplace "src/config.h", "/etc/dnsmasq.conf", "#{etc}/dnsmasq.conf"
 
     # Optional IDN support
-    if build.include? 'with-idn'
+    if build.with? "libidn"
       inreplace "src/config.h", "/* #define HAVE_IDN */", "#define HAVE_IDN"
+    end
+
+    # Optional DNSSEC support
+    if build.with? "dnssec"
+      inreplace "src/config.h", "/* #define HAVE_DNSSEC */", "#define HAVE_DNSSEC"
     end
 
     # Fix compilation on Lion
@@ -51,16 +67,21 @@ class Dnsmasq < Formula
         <string>#{plist_name}</string>
         <key>ProgramArguments</key>
         <array>
-          <string>#{opt_prefix}/sbin/dnsmasq</string>
+          <string>#{opt_sbin}/dnsmasq</string>
           <string>--keep-in-foreground</string>
+          <string>-C</string>
+          <string>#{etc}/dnsmasq.conf</string>
         </array>
+        <key>RunAtLoad</key>
+        <true/>
         <key>KeepAlive</key>
-        <dict>
-          <key>NetworkState</key>
-          <true/>
-        </dict>
+        <true/>
       </dict>
     </plist>
     EOS
+  end
+
+  test do
+    system "#{sbin}/dnsmasq", "--test"
   end
 end

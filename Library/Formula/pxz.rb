@@ -1,6 +1,7 @@
 require 'formula'
 
 class Pxz < Formula
+  desc "Compression utility"
   homepage 'http://jnovy.fedorapeople.org/pxz/'
   url 'http://jnovy.fedorapeople.org/pxz/pxz-4.999.9beta.20091201git.tar.xz'
   version '4.999.9'
@@ -12,9 +13,7 @@ class Pxz < Formula
     cause "pxz requires OpenMP support"
   end
 
-  def patches
-    DATA # Fixes usage of MAP_POPULATE for mmap (linux only)
-  end
+  patch :DATA # Fixes usage of MAP_POPULATE for mmap (linux only)
 
   def install
     system "make", "CC=#{ENV.cc}"

@@ -1,12 +1,13 @@
 require 'formula'
 
 class Ifstat < Formula
+  desc "Tool to report network interface bandwidth"
   homepage 'http://gael.roualland.free.fr/ifstat/'
   url 'http://gael.roualland.free.fr/ifstat/ifstat-1.1.tar.gz'
   sha1 '4ebf59207d24e53461f841a2480a6710d774fce2'
 
   # Fixes 32/64 bit incompatibility for snow leopard
-  def patches; DATA; end
+  patch :DATA
 
   def install
     system "./configure", "--disable-debug", "--disable-dependency-tracking",

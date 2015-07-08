@@ -1,23 +1,28 @@
-require 'formula'
-
 class Nexus < Formula
-  homepage 'http://www.sonatype.org/'
-  url 'http://download.sonatype.com/nexus/oss/nexus-2.5.0-04-bundle.tar.gz'
-  version '2.5.0-04'
-  sha1 'd6f438f25b08346f7590344c4a4175a8e547c7cb'
+  desc "Repository manager for binary software components"
+  homepage "http://www.sonatype.org/"
+  url "https://download.sonatype.com/nexus/oss/nexus-2.11.3-01-bundle.tar.gz"
+  version "2.11.3-01"
+  sha256 "a155a056a5ffe8b129200cbe83721f083ccb220fddffd19c737690804bc791c7"
 
-  # Put the sonatype-work directory in the var directory, to persist across version updates
-  def patches
-    DATA
+  bottle do
+    cellar :any
+    sha256 "9faceac9f3b0eac6c78c6d400e6fe2c0f5f9eb38e5ee5f7507c93f60163c6cc6" => :yosemite
+    sha256 "003848e3c5bda97a0f2983165b14ed5c81d93190e3585685b6d36e43413aae9e" => :mavericks
+    sha256 "f33d6de510d225b97461465d360f741b11391b7c69d43200730c5d02959f789a" => :mountain_lion
   end
 
   def install
-    rm_f Dir['bin/*.bat']
-    libexec.install Dir["nexus-2.5.0-04/*"]
-    bin.install_symlink libexec/'bin/nexus'
+    rm_f Dir["bin/*.bat"]
+    # Put the sonatype-work directory in the var directory, to persist across version updates
+    inreplace "nexus-#{version}/conf/nexus.properties",
+      "nexus-work=${bundleBasedir}/../sonatype-work/nexus",
+      "nexus-work=#{var}/nexus"
+    libexec.install Dir["nexus-#{version}/*"]
+    bin.install_symlink libexec/"bin/nexus"
   end
 
-  plist_options :manual => "#{HOMEBREW_PREFIX}/opt/nexus/libexec/bin/nexus { console | start | stop | restart | status | dump }"
+  plist_options :manual => "nexus start"
 
   def plist; <<-EOS.undent
     <?xml version="1.0" encoding="UTF-8"?>
@@ -28,7 +33,7 @@ class Nexus < Formula
         <string>com.sonatype.nexus</string>
         <key>ProgramArguments</key>
         <array>
-          <string>/usr/local/opt/nexus/bin/nexus</string>
+          <string>#{opt_bin}/nexus</string>
           <string>start</string>
         </array>
         <key>RunAtLoad</key>
@@ -38,25 +43,8 @@ class Nexus < Formula
     EOS
   end
 
-  def caveats; <<-EOS.undent
-    If you are upgrading nexus for the first time, and old version is less than 2.3.1, then
-    you will need to copy the sonatype-work directory from:
-      #{HOMEBREW_PREFIX}/Cellar/#{name}/<old version>/
-    to
-      #{var}
-    EOS
+  test do
+    output = `#{bin}/nexus status`
+    assert_match "Nexus OSS is", output
   end
 end
-
-__END__
-diff --git a/nexus-2.5.0-04/conf/nexus.properties b/nexus-2.5.0-04/conf/nexus.properties
-index df89251..23b536b 100644
---- a/nexus-2.5.0-04/conf/nexus.properties
-+++ b/nexus-2.5.0-04/conf/nexus.properties
-@@ -22,5 +22,5 @@ nexus-webapp=${bundleBasedir}/nexus
- nexus-webapp-context-path=/nexus
-
- # Nexus section
--nexus-work=${bundleBasedir}/../sonatype-work/nexus
-+nexus-work=HOMEBREW_PREFIX/var/nexus
- runtime=${bundleBasedir}/nexus/WEB-INF

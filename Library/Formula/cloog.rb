@@ -1,19 +1,45 @@
-require 'formula'
-
 class Cloog < Formula
-  homepage 'http://www.cloog.org/'
-  url 'http://www.bastoul.net/cloog/pages/download/count.php3?url=./cloog-0.18.0.tar.gz'
-  sha1 '85f620a26aabf6a934c44ca40a9799af0952f863'
+  desc "Generate code for scanning Z-polyhedra"
+  homepage "http://www.cloog.org/"
+  url "http://www.bastoul.net/cloog/pages/download/count.php3?url=./cloog-0.18.3.tar.gz"
+  sha256 "460c6c740acb8cdfbfbb387156b627cf731b3837605f2ec0001d079d89c69734"
 
-  depends_on 'pkg-config' => :build
-  depends_on 'gmp'
-  depends_on 'isl'
+  bottle do
+    cellar :any
+    revision 3
+    sha256 "969fb3f488c9efb95cf1d631f6f2e577fa60f09c858b6cda5a477aec9f3552b3" => :yosemite
+    sha256 "63786794ea49b86abd2c0e0168b36ff3489779f1de2b3dfd4ede509dcf6a5bfa" => :mavericks
+    sha256 "00248fca2b492a7a32e9170e2875db55391b4881656cce3f4990f38ca04ec110" => :mountain_lion
+  end
+
+  head do
+    url "http://repo.or.cz/r/cloog.git"
+    depends_on "autoconf" => :build
+    depends_on "automake" => :build
+    depends_on "libtool" => :build
+  end
+
+  depends_on "pkg-config" => :build
+  depends_on "gmp"
+  depends_on "isl"
 
   def install
-    system "./configure", "--disable-dependency-tracking",
-                          "--prefix=#{prefix}",
-                          "--with-isl-prefix=#{Formula.factory("isl").opt_prefix}"
-    system "make install"
+    system "./autogen.sh" if build.head?
+
+    args = [
+      "--disable-dependency-tracking",
+      "--disable-silent-rules",
+      "--prefix=#{prefix}",
+      "--with-gmp=system",
+      "--with-gmp-prefix=#{Formula["gmp"].opt_prefix}",
+      "--with-isl=system",
+      "--with-isl-prefix=#{Formula["isl"].opt_prefix}"
+    ]
+
+    args << "--with-osl=bundled" if build.head?
+
+    system "./configure", *args
+    system "make", "install"
   end
 
   test do
@@ -33,11 +59,7 @@ class Cloog < Formula
       0
     EOS
 
-    require 'open3'
-    Open3.popen3("#{bin}/cloog", "/dev/stdin") do |stdin, stdout, _|
-      stdin.write(cloog_source)
-      stdin.close
-      assert_match /Generated from \/dev\/stdin by CLooG/, stdout.read
-    end
+    output = pipe_output("#{bin}/cloog /dev/stdin", cloog_source)
+    assert_match %r{Generated from /dev/stdin by CLooG}, output
   end
 end

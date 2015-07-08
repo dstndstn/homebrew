@@ -1,9 +1,10 @@
 require 'formula'
 
 class OsmPbf < Formula
+  desc "Tools related to PBF (an alternative to XML format)"
   homepage 'http://wiki.openstreetmap.org/wiki/PBF_Format'
-  url 'https://github.com/scrosby/OSM-binary/archive/v1.3.0.tar.gz'
-  sha1 'bb9bcd776f2876696b5c5d970d3a68c2222a7ac3'
+  url 'https://github.com/scrosby/OSM-binary/archive/v1.3.3.tar.gz'
+  sha1 '639e3eecc00041e6326b69da6c200fabe7ad2895'
 
   depends_on 'protobuf'
 

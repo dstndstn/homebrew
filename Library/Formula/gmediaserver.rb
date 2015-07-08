@@ -1,6 +1,7 @@
 require 'formula'
 
 class Gmediaserver < Formula
+  desc "UPnP Mediaserver"
   homepage 'http://www.gnu.org/software/gmediaserver/'
   url 'http://download.savannah.gnu.org/releases/gmediaserver/gmediaserver-0.13.0.tar.gz'
   sha1 '5b868bc3c3d3bf0c2c550a4fc618c586a2640799'
@@ -11,11 +12,9 @@ class Gmediaserver < Formula
   depends_on 'id3lib' => :optional
   depends_on 'taglib' => :optional
 
-  def patches
-    # patching gmediaserver because sigwaitinfo is not available on
-    # mac os x snow leopard, using sigwait instead
-    DATA
-  end
+  # patching gmediaserver because sigwaitinfo is not available on
+  # mac os x snow leopard, using sigwait instead
+  patch :DATA
 
   def install
     system "./configure", "--disable-debug", "--disable-dependency-tracking",

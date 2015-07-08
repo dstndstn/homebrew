@@ -1,6 +1,7 @@
 require 'formula'
 
 class Devtodo < Formula
+  desc "Command-line task lists"
   homepage 'http://swapoff.org/DevTodo'
   url 'http://swapoff.org/files/devtodo/devtodo-0.1.20.tar.gz'
   sha1 '003067a12139d712dbb3706069e0950a93ecaaf4'
@@ -9,9 +10,7 @@ class Devtodo < Formula
 
   # Fix invalid regex. See http://swapoff.org/ticket/54
   # @adamv - this url not responding 3/17/2012
-  def patches
-    DATA
-  end
+  patch :DATA
 
   def install
     # Rename Regex.h to Regex.hh to avoid case-sensitivity confusion with regex.h

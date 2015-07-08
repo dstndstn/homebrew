@@ -1,9 +1,17 @@
 require 'formula'
 
 class Libnfc < Formula
+  desc "Low level NFC SDK and Programmers API"
   homepage 'http://www.libnfc.org/'
-  url 'http://libnfc.googlecode.com/files/libnfc-1.7.0-rc7.tar.gz'
-  sha1 '6ceb5e1ab810f49fadff9c5e2ecb8bf28a611c56'
+  url 'https://libnfc.googlecode.com/files/libnfc-1.7.0.tar.bz2'
+  sha1 '5adfb6c6238b1659ad8609837dc8e59eb41a8768'
+
+  bottle do
+    revision 2
+    sha1 "55ecc37dabd8c848975f3bbf20a8ab7eb191a788" => :yosemite
+    sha1 "13c61f303c9a2dc90d316f81ce7c615b8bb0e2f1" => :mavericks
+    sha1 "4d9b2216eb876d9a63fe0c0b168b2de0766d0a21" => :mountain_lion
+  end
 
   depends_on 'pkg-config' => :build
   depends_on 'libusb-compat'
@@ -12,13 +20,12 @@ class Libnfc < Formula
   # Reported upstream:
   # https://groups.google.com/forum/?fromgroups=#!topic/libnfc-devel/K0cwIdPuqJg
   # Another patch adds support for USB CDC / ACM type serial ports (tty.usbmodem)
-  def patches
-    DATA
-  end
+  patch :DATA
 
   def install
     system "./configure", "--disable-debug", "--disable-dependency-tracking",
-                          "--prefix=#{prefix}"
+                          "--prefix=#{prefix}", "--enable-serial-autoprobe",
+                          "--with-drivers=all"
     system "make install"
     (prefix/'etc/nfc/libnfc.conf').write "allow_intrusive_scan=yes"
   end
@@ -54,7 +61,7 @@ index 7b687c1..686f9ed 100644
 
  #  if defined(__APPLE__)
 -const char *serial_ports_device_radix[] = { "tty.SLAB_USBtoUART", "tty.usbserial-", NULL };
-+const char *serial_ports_device_radix[] = { "tty.SLAB_USBtoUART", "tty.usbserial-", "tty.usbmodem", NULL };
++const char *serial_ports_device_radix[] = { "tty.SLAB_USBtoUART", "tty.usbserial-", "tty.usbmodem", "tty.usbserial", NULL };
  #  elif defined (__FreeBSD__) || defined (__OpenBSD__)
  const char *serial_ports_device_radix[] = { "cuaU", "cuau", NULL };
  #  elif defined (__linux__)

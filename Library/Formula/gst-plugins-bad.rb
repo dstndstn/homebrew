@@ -1,40 +1,61 @@
 require 'formula'
 
 class GstPluginsBad < Formula
+  desc "GStreamer plugins (less supported, missing docs, not fully tested)"
   homepage 'http://gstreamer.freedesktop.org/'
-  url 'http://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.0.8.tar.xz'
-  mirror 'http://ftp.osuosl.org/pub/blfs/svn/g/gst-plugins-bad-1.0.8.tar.xz'
-  sha256 '6949b5532034fc37d5a874e4e3330107767238bc4def9f769b8193124e2420cc'
+  url 'http://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.4.5.tar.xz'
+  mirror 'http://ftp.osuosl.org/pub/blfs/svn/g/gst-plugins-bad-1.4.5.tar.xz'
+  sha256 "152fad7250683d72f9deb36c5685428338365fe4a4c87ffe15e38783b14f983c"
+
+  bottle do
+    sha1 "ee012b6192397e44d9dc1bc8646fccb9e360f787" => :yosemite
+    sha1 "5b29c05070a308f2fd45be44b53939807301b6fe" => :mavericks
+    sha1 "bc81df3a700b39b388b1301fe4ed960ab3258aa6" => :mountain_lion
+  end
+
+  head do
+    url 'git://anongit.freedesktop.org/gstreamer/gst-plugins-bad'
+
+    depends_on "autoconf" => :build
+    depends_on "automake" => :build
+    depends_on "libtool" => :build
+    depends_on "openssl"
+  end
 
   depends_on 'pkg-config' => :build
-  depends_on 'xz' => :build
   depends_on 'gettext'
   depends_on 'gst-plugins-base'
 
-  # These optional dependencies are based on the intersection of
-  # gst-plugins-bad-0.10.21/REQUIREMENTS and Homebrew formulae
   depends_on 'dirac' => :optional
-  depends_on 'libdvdread' => :optional
-  depends_on 'libmms' => :optional
-
-  # These are not mentioned in REQUIREMENTS, but configure look for them
-  depends_on 'libexif' => :optional
   depends_on 'faac' => :optional
   depends_on 'faad2' => :optional
-  depends_on 'libsndfile' => :optional
-  depends_on 'schroedinger' => :optional
+  depends_on 'gnutls' => :optional
+  depends_on 'libdvdread' => :optional
+  depends_on 'libexif' => :optional
+  depends_on 'libmms' => :optional
   depends_on 'rtmpdump' => :optional
+  depends_on 'schroedinger' => :optional
+
+  option 'with-applemedia', 'Build with applemedia support'
 
   def install
-    ENV.append "CFLAGS", "-no-cpp-precomp" unless ENV.compiler == :clang
-    ENV.append "CFLAGS", "-funroll-loops -fstrict-aliasing"
-    system "./configure", "--prefix=#{prefix}",
-                          "--disable-debug",
-                          "--disable-dependency-tracking",
-                          "--disable-sdl",
-                          # gst/interfaces/propertyprobe.h is missing from gst-plugins-base 1.0.x
-                          "--disable-osx_video"
+    args = %W[
+      --prefix=#{prefix}
+      --disable-yadif
+      --disable-sdl
+      --disable-debug
+      --disable-dependency-tracking
+    ]
+
+    args << "--disable-apple_media" if build.without? "applemedia"
+
+    if build.head?
+      ENV["NOCONFIGURE"] = "yes"
+      system "./autogen.sh"
+    end
+
+    system "./configure", *args
     system "make"
-    system "make install"
+    system "make", "install"
   end
 end

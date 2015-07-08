@@ -1,41 +1,41 @@
-require 'formula'
-
 class SeleniumServerStandalone < Formula
-  homepage 'http://seleniumhq.org/'
-  url 'http://selenium.googlecode.com/files/selenium-server-standalone-2.33.0.jar'
-  sha1 '1eeb43187fb8550a91cf4a270ca9ac8553156bcf'
+  desc "Browser automation for testing purposes"
+  homepage "http://seleniumhq.org/"
+  url "https://selenium-release.storage.googleapis.com/2.46/selenium-server-standalone-2.46.0.jar"
+  sha256 "deb997cfbbc29680b20e7af6960b5c49ecd5aa3e17fba0d3288cfb9c62a9b9e6"
 
   def install
-    prefix.install "selenium-server-standalone-#{version}.jar"
+    libexec.install "selenium-server-standalone-#{version}.jar"
+    bin.write_jar_script libexec/"selenium-server-standalone-#{version}.jar", "selenium-server"
   end
 
-  plist_options :manual => "java -jar #{HOMEBREW_PREFIX}/opt/selenium-server-standalone/selenium-server-standalone-#{version}.jar -p 4444"
+  plist_options :manual => "selenium-server -p 4444"
 
   def plist; <<-EOS.undent
     <?xml version="1.0" encoding="UTF-8"?>
     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
     <plist version="1.0">
     <dict>
-            <key>Label</key>
-            <string>#{plist_name}</string>
-            <key>RunAtLoad</key>
-            <true/>
-            <key>KeepAlive</key>
-            <false/>
-            <key>ProgramArguments</key>
-            <array>
-                    <string>/usr/bin/java</string>
-                    <string>-jar</string>
-                    <string>#{prefix}/selenium-server-standalone-#{version}.jar</string>
-                    <string>-port</string>
-                    <string>4444</string>
-            </array>
-            <key>ServiceDescription</key>
-            <string>Selenium Server</string>
-            <key>StandardErrorPath</key>
-            <string>/var/log/selenium/selenium-error.log</string>
-            <key>StandardOutPath</key>
-            <string>/var/log/selenium/selenium-output.log</string>
+      <key>Label</key>
+      <string>#{plist_name}</string>
+      <key>RunAtLoad</key>
+      <true/>
+      <key>KeepAlive</key>
+      <false/>
+      <key>ProgramArguments</key>
+      <array>
+        <string>/usr/bin/java</string>
+        <string>-jar</string>
+        <string>#{libexec}/selenium-server-standalone-#{version}.jar</string>
+        <string>-port</string>
+        <string>4444</string>
+      </array>
+      <key>ServiceDescription</key>
+      <string>Selenium Server</string>
+      <key>StandardErrorPath</key>
+      <string>#{var}/log/selenium-error.log</string>
+      <key>StandardOutPath</key>
+      <string>#{var}/log/selenium-output.log</string>
     </dict>
     </plist>
     EOS

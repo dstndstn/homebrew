@@ -1,20 +1,18 @@
 require 'formula'
 
 class Jsvc < Formula
+  desc "Wrapper to launch Java applications as daemons"
   homepage 'http://commons.apache.org/daemon/jsvc.html'
   url 'http://archive.apache.org/dist/commons/daemon/source/commons-daemon-1.0.15-native-src.tar.gz'
   version '1.0.15'
   sha1 'f99fa9bcbc3faf6660e760af099eb003e2553b39'
 
   # Enable Java 7 JVMs: https://issues.apache.org/jira/browse/DAEMON-281
-  def patches
-    DATA
-  end
+  patch :DATA
 
   def install
-    arch = Hardware.is_64_bit? ? "-arch x86_64" : "-arch i386"
-    ENV.append "CFLAGS", arch
-    ENV.append "LDFLAGS", arch
+    ENV.append "CFLAGS", "-arch #{MacOS.preferred_arch}"
+    ENV.append "LDFLAGS", "-arch #{MacOS.preferred_arch}"
     ENV.append "CPPFLAGS", "-I/System/Library/Frameworks/JavaVM.framework/Versions/Current/Headers"
 
     prefix.install %w{ NOTICE.txt LICENSE.txt RELEASE-NOTES.txt }

@@ -1,9 +1,10 @@
 require 'formula'
 
 class Rabbitmq < Formula
-  homepage 'http://www.rabbitmq.com'
-  url 'http://www.rabbitmq.com/releases/rabbitmq-server/v3.1.3/rabbitmq-server-mac-standalone-3.1.3.tar.gz'
-  sha1 '631b9e46e046db9f591d6027ee690ffaaab20a45'
+  desc "Messaging broker"
+  homepage 'https://www.rabbitmq.com'
+  url 'https://www.rabbitmq.com/releases/rabbitmq-server/v3.5.3/rabbitmq-server-mac-standalone-3.5.3.tar.gz'
+  sha256 'b6c25f20decfcdfee90bd9023e54ab9936d19039d4f01315458b2c83766318f2'
 
   depends_on 'simplejson' => :python if MacOS.version <= :leopard
 
@@ -67,7 +68,7 @@ class Rabbitmq < Formula
         <key>Label</key>
         <string>#{plist_name}</string>
         <key>Program</key>
-        <string>#{opt_prefix}/sbin/rabbitmq-server</string>
+        <string>#{opt_sbin}/rabbitmq-server</string>
         <key>RunAtLoad</key>
         <true/>
         <key>EnvironmentVariables</key>

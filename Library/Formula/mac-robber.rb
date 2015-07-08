@@ -1,8 +1,9 @@
 require 'formula'
 
 class MacRobber < Formula
+  desc "Digital investigation tool"
   homepage 'http://www.sleuthkit.org/mac-robber/'
-  url 'http://downloads.sourceforge.net/project/mac-robber/mac-robber/1.02/mac-robber-1.02.tar.gz'
+  url 'https://downloads.sourceforge.net/project/mac-robber/mac-robber/1.02/mac-robber-1.02.tar.gz'
   sha1 'c50c823ac14ac8e78e79e0965134b028757e4519'
 
   def install

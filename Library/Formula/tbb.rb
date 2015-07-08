@@ -1,26 +1,51 @@
-require 'formula'
-
 class Tbb < Formula
-  homepage 'http://www.threadingbuildingblocks.org/'
-  url 'http://threadingbuildingblocks.org/sites/default/files/software_releases/source/tbb41_20130613oss_src.tgz'
-  sha1 'b1322bd10c5b05a79f61edb236adc0513b4a1532'
-  version '4.1u4'
+  desc "A rich and complete approach to parallelism in C++"
+  homepage "https://www.threadingbuildingblocks.org/"
+  url "https://www.threadingbuildingblocks.org/sites/default/files/software_releases/source/tbb43_20150611oss_src.tgz"
+  sha1 "5457cd15ad13625442283e67844199a79e88a3a4"
+  version "4.3-20150611"
 
-  fails_with :clang do
-    cause "Undefined symbols for architecture x86_64: vtable for tbb::tbb_exception"
+  bottle do
+    cellar :any
+    sha256 "b9dc9ced92b25c87cf44fe5e9280364cd715ef48f7ae0f43877bfe51dc84a672" => :yosemite
+    sha256 "bb73a51ac2d3438d2138244f6b69298749eb12e2a36895119755d2a1873f6125" => :mavericks
+    sha256 "03a178526e7a878080bae4e730e14853afdf8cc6709c0e58d294ac916b6498d1" => :mountain_lion
   end
+
+  # requires malloc features first introduced in Lion
+  # https://github.com/Homebrew/homebrew/issues/32274
+  depends_on :macos => :lion
+
+  option :cxx11
 
   def install
     # Intel sets varying O levels on each compile command.
     ENV.no_optimization
-    # Override build prefix so we can copy the dylibs out of the same place
-    # no matter what system we're on, and use our compilers.
-    args = ['tbb_build_prefix=BUILDPREFIX',
-            "CONLY=#{ENV.cc}",
-            "CPLUS=#{ENV.cxx}"]
-    args << (MacOS.prefer_64_bit? ? "arch=intel64" : "arch=ia32")
+
+    args = %W[tbb_build_prefix=BUILDPREFIX]
+
+    if build.cxx11?
+      ENV.cxx11
+      args << "cpp0x=1" << "stdlib=libc++"
+    end
+
     system "make", *args
-    lib.install Dir['build/BUILDPREFIX_release/*.dylib']
-    include.install 'include/tbb'
+    lib.install Dir["build/BUILDPREFIX_release/*.dylib"]
+    include.install "include/tbb"
+  end
+
+  test do
+    (testpath/"test.cpp").write <<-EOS.undent
+      #include <tbb/task_scheduler_init.h>
+      #include <iostream>
+
+      int main()
+      {
+        std::cout << tbb::task_scheduler_init::default_num_threads();
+        return 0;
+      }
+    EOS
+    system ENV.cxx, "test.cpp", "-ltbb", "-o", "test"
+    system "./test"
   end
 end

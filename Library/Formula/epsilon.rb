@@ -1,8 +1,9 @@
 require 'formula'
 
 class Epsilon < Formula
+  desc "Powerful wavelet image compressor"
   homepage 'http://epsilon-project.sourceforge.net'
-  url 'http://downloads.sourceforge.net/project/epsilon-project/epsilon/0.9.2/epsilon-0.9.2.tar.gz'
+  url 'https://downloads.sourceforge.net/project/epsilon-project/epsilon/0.9.2/epsilon-0.9.2.tar.gz'
   sha1 '050b0d2e35057c1a82f8927aceebe61a045c388e'
 
   depends_on 'popt'

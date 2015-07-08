@@ -1,6 +1,7 @@
 require 'formula'
 
 class Lastfmfpclient < Formula
+  desc "Last.fm fingerprint library"
   homepage 'https://github.com/lastfm/Fingerprinter'
   url 'https://github.com/lastfm/Fingerprinter/archive/9ee83a51ac9058ff53c9.tar.gz'
   version '1.6'
@@ -16,7 +17,7 @@ class Lastfmfpclient < Formula
     # This project was made on Windows (LOL), patches against Windows
     # line-endings fail for some reason, so we will inreplace instead.
     # Fixes compile with clang failure due to entirely missing variable, how
-    # the fuck did GCC ever compile this?!
+    # on earth did GCC ever compile this?!
     inreplace 'fplib/src/FloatingAverage.h',
       'for ( int i = 0; i < size; ++i )',
       'for ( int i = 0; i < m_values.size(); ++i )'

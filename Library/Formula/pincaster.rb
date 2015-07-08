@@ -1,6 +1,7 @@
 require 'formula'
 
 class Pincaster < Formula
+  desc "Nosql database with a HTTP/JSON interface"
   homepage 'https://github.com/jedisct1/Pincaster'
   url 'http://download.pureftpd.org/pincaster/releases/pincaster-0.6.tar.bz2'
   sha1 'ad3799ce3207480979355f30d6f534dad6229ae2'
@@ -31,7 +32,7 @@ class Pincaster < Formula
         <string>#{plist_name}</string>
         <key>ProgramArguments</key>
         <array>
-          <string>#{opt_prefix}/bin/pincaster</string>
+          <string>#{opt_bin}/pincaster</string>
           <string>#{etc}/pincaster.conf</string>
         </array>
         <key>RunAtLoad</key>

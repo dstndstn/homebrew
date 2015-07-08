@@ -1,22 +1,21 @@
 require 'formula'
 
 class Snownews < Formula
+  desc "Text mode RSS newsreader"
   homepage 'https://kiza.eu/software/snownews'
   url 'https://kiza.eu/media/software/snownews/snownews-1.5.12.tar.gz'
   sha1 'b3addaac25c2c093aa5e60b8b89e50e7d7450bcf'
 
   option 'without-nls', "Build without translations"
 
-  depends_on 'gettext' unless build.without? 'nls'
+  depends_on 'gettext' if build.with? 'nls'
 
   # Fix zlib linking issue on OS X
   # snownews author assisted on quest creating this working Formula.
   # Author is aware of the issue tackled. However, no statement has been made whether
   # any future release will change to a more (homebrew) robust = cleaner = simpler basis.
   # homebrew reference added on 2013-07-06 to https://kiza.eu/software/snownews/downloading
-  def patches
-    DATA
-  end
+  patch :DATA
 
   def install
     args = ["--prefix=#{prefix}"]

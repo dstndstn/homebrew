@@ -1,6 +1,7 @@
 require 'formula'
 
 class Cdargs < Formula
+  desc "Bookmarks for the shell"
   homepage 'http://www.skamphausen.de/cgi-bin/ska/CDargs'
   url 'http://www.skamphausen.de/downloads/cdargs/cdargs-1.35.tar.gz'
   sha1 '20017d09d3259fcd1385754554a3e17a1c975f9b'
@@ -12,9 +13,7 @@ class Cdargs < Formula
 
   # fixes zsh usage using the patch provided at the cdargs homepage
   # (See http://www.skamphausen.de/cgi-bin/ska/CDargs)
-  def patches
-    DATA
-  end
+  patch :DATA
 
   def install
     system "./configure", "--prefix=#{prefix}", "--mandir=#{man}"

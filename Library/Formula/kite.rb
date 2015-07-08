@@ -1,6 +1,7 @@
 require 'formula'
 
 class Kite < Formula
+  desc "Programming language designed to minimize programmer experience"
   homepage 'http://www.kite-language.org/'
   url 'http://www.kite-language.org/files/kite-1.0.4.tar.gz'
   sha1 '9db2adbcc3acac5f06d495002a344e613c81c3f2'
@@ -8,7 +9,7 @@ class Kite < Formula
   depends_on 'bdw-gc'
 
   # patch to build against bdw-gc 7.2, sent upstream
-  def patches; DATA; end
+  patch :DATA
 
   def install
     system "./configure", "--disable-debug", "--disable-dependency-tracking",

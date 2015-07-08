@@ -1,8 +1,9 @@
 require "formula"
 
 class Ocp < Formula
+  desc "UNIX port of the Open Cubic Player"
   homepage "http://sourceforge.net/p/opencubicplayer/home/"
-  url "http://downloads.sourceforge.net/project/opencubicplayer/ocp-0.1.21/ocp-0.1.21.tar.bz2"
+  url "https://downloads.sourceforge.net/project/opencubicplayer/ocp-0.1.21/ocp-0.1.21.tar.bz2"
   sha1 "aaa16cf1979c572b09c73e7cc61350bfc4477380"
 
   depends_on "libvorbis"

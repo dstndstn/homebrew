@@ -1,14 +1,45 @@
-require 'formula'
-require 'utils'
-require 'superenv'
-require 'formula_cellar_checks'
+require "formula"
+require "utils"
+require "extend/ENV"
+require "formula_cellar_checks"
+require "official_taps"
+require "tap_migrations"
+require "cmd/search"
 
-module Homebrew extend self
+module Homebrew
   def audit
     formula_count = 0
     problem_count = 0
 
+    strict = ARGV.include? "--strict"
+    if strict && ARGV.formulae.any? && MacOS.version >= :mavericks
+      require "cmd/style"
+      ohai "brew style #{ARGV.formulae.join " "}"
+      style
+    end
+
+    ENV.activate_extensions!
     ENV.setup_build_environment
+
+    if ARGV.switch? "D"
+      FormulaAuditor.module_eval do
+        instance_methods.grep(/audit_/).map do |name|
+          method = instance_method(name)
+          define_method(name) do |*args, &block|
+            begin
+              time = Time.now
+              method.bind(self).call(*args, &block)
+            ensure
+              $times[name] ||= 0
+              $times[name] += Time.now - time
+            end
+          end
+        end
+      end
+
+      $times = {}
+      at_exit { puts $times.sort_by{ |k, v| v }.map{ |k, v| "#{k}: #{v}" } }
+    end
 
     ff = if ARGV.named.empty?
       Formula
@@ -16,54 +47,45 @@ module Homebrew extend self
       ARGV.formulae
     end
 
+    output_header = !strict
+
     ff.each do |f|
-      fa = FormulaAuditor.new f
+      fa = FormulaAuditor.new(f, :strict => strict)
       fa.audit
 
       unless fa.problems.empty?
-        puts "#{f.name}:"
-        fa.problems.each { |p| puts " * #{p}" }
-        puts
+        unless output_header
+          puts
+          ohai "audit problems"
+          output_header = true
+        end
+
         formula_count += 1
         problem_count += fa.problems.size
+        puts "#{f.full_name}:", fa.problems.map { |p| " * #{p}" }, ""
       end
     end
 
     unless problem_count.zero?
-      ofail "#{problem_count} problems in #{formula_count} formulae"
+      problems = "problem" + plural(problem_count)
+      formulae = "formula" + plural(formula_count, "e")
+      ofail "#{problem_count} #{problems} in #{formula_count} #{formulae}"
     end
-  end
-end
-
-class Module
-  def redefine_const(name, value)
-    __send__(:remove_const, name) if const_defined?(name)
-    const_set(name, value)
-  end
-end
-
-# Formula extensions for auditing
-class Formula
-  def head_only?
-    @head and @stable.nil?
-  end
-
-  def text
-    @text ||= FormulaText.new(@path)
   end
 end
 
 class FormulaText
   def initialize path
-    @text = path.open('r') { |f| f.read }
+    @text = path.open("rb", &:read)
+    @lines = @text.lines.to_a
   end
 
   def without_patch
-    @text.split("__END__")[0].strip()
+    @text.split("\n__END__").first
   end
 
   def has_DATA?
-    /\bDATA\b/ =~ @text
+    /^[^#]*\bDATA\b/ =~ @text
   end
 
   def has_END?
@@ -73,12 +95,21 @@ class FormulaText
   def has_trailing_newline?
     /\Z\n/ =~ @text
   end
+
+  def =~ regex
+    regex =~ @text
+  end
+
+  def line_number regex
+    index = @lines.index { |line| line =~ regex }
+    index ? index + 1 : nil
+  end
 end
 
 class FormulaAuditor
   include FormulaCellarChecks
 
-  attr_reader :f, :text, :problems
+  attr_reader :formula, :text, :problems
 
   BUILD_TIME_DEPS = %W[
     autoconf
@@ -95,250 +126,435 @@ class FormulaAuditor
     swig
   ]
 
-  def initialize f
-    @f = f
-    @problems = []
-    @text = f.text.without_patch
-    @specs = %w{stable devel head}.map { |s| f.send(s) }.compact
+  FILEUTILS_METHODS = FileUtils.singleton_methods(false).join "|"
 
-    # We need to do this in case the formula defines a patch that uses DATA.
-    f.class.redefine_const :DATA, ""
+  def initialize(formula, options={})
+    @formula = formula
+    @strict = !!options[:strict]
+    @problems = []
+    @text = FormulaText.new(formula.path)
+    @specs = %w{stable devel head}.map { |s| formula.send(s) }.compact
   end
 
   def audit_file
-    unless f.path.stat.mode.to_s(8) == "100644"
-      problem "Incorrect file permissions: chmod 644 #{f.path}"
+    unless formula.path.stat.mode == 0100644
+      problem "Incorrect file permissions: chmod 644 #{formula.path}"
     end
 
-    if f.text.has_DATA? and not f.text.has_END?
+    if text.has_DATA? and not text.has_END?
       problem "'DATA' was found, but no '__END__'"
     end
 
-    if f.text.has_END? and not f.text.has_DATA?
+    if text.has_END? and not text.has_DATA?
       problem "'__END__' was found, but 'DATA' is not used"
     end
 
-    unless f.text.has_trailing_newline?
+    unless text.has_trailing_newline?
       problem "File should end with a newline"
+    end
+
+    return unless @strict
+
+    component_list = [
+      [/^  desc ["'][\S\ ]+["']/,          "desc"          ],
+      [/^  homepage ["'][\S\ ]+["']/,      "homepage"      ],
+      [/^  url ["'][\S\ ]+["']/,           "url"           ],
+      [/^  mirror ["'][\S\ ]+["']/,        "mirror"        ],
+      [/^  version ["'][\S\ ]+["']/,       "version"       ],
+      [/^  (sha1|sha256) ["'][\S\ ]+["']/, "checksum"      ],
+      [/^  head ["'][\S\ ]+["']/,          "head"          ],
+      [/^  stable do/,                     "stable block"  ],
+      [/^  bottle do/,                     "bottle block"  ],
+      [/^  devel do/,                      "devel block"   ],
+      [/^  head do/,                       "head block"    ],
+      [/^  option/,                        "option"        ],
+      [/^  depends_on/,                    "depends_on"    ],
+      [/^  def install/,                   "install method"],
+      [/^  def caveats/,                   "caveats method"],
+      [/^  test do/,                       "test block"    ],
+    ]
+
+    component_list.map do |regex, name|
+      lineno = text.line_number regex
+      next unless lineno
+      [lineno, name]
+    end.compact.each_cons(2) do |c1, c2|
+      unless c1[0] < c2[0]
+        problem "`#{c1[1]}`(line #{c1[0]}) should be put before `#{c2[1]}`(line #{c2[0]})"
+      end
+    end
+  end
+
+  def audit_class
+    if @strict
+      unless formula.test_defined?
+        problem "A `test do` test block should be added"
+      end
+    end
+
+    if Object.const_defined?("GithubGistFormula") && formula.class < GithubGistFormula
+      problem "GithubGistFormula is deprecated, use Formula instead"
+    end
+
+    if Object.const_defined?("ScriptFileFormula") && formula.class < ScriptFileFormula
+      problem "ScriptFileFormula is deprecated, use Formula instead"
+    end
+
+    if Object.const_defined?("AmazonWebServicesFormula") && formula.class < AmazonWebServicesFormula
+      problem "AmazonWebServicesFormula is deprecated, use Formula instead"
+    end
+  end
+
+  @@aliases ||= Formula.aliases
+  @@remote_official_taps ||= if (homebrew_tapd = HOMEBREW_LIBRARY/"Taps/homebrew").directory?
+    OFFICIAL_TAPS - homebrew_tapd.subdirs.map(&:basename).map { |tap| tap.to_s.sub(/^homebrew-/, "") }
+  else
+    OFFICIAL_TAPS
+  end
+
+  def audit_formula_name
+    return unless @strict
+    # skip for non-official taps
+    return if !formula.core_formula? && !formula.tap.to_s.start_with?("homebrew")
+
+    name = formula.name
+    full_name = formula.full_name
+
+    if @@aliases.include? name
+      problem "Formula name conflicts with existing aliases."
+      return
+    end
+
+    if !formula.core_formula? && Formula.core_names.include?(name)
+      problem "Formula name conflicts with existing core formula."
+      return
+    end
+
+    same_name_tap_formulae = Formula.tap_names.select do |tap_formula_name|
+      user_name, _, formula_name = tap_formula_name.split("/", 3)
+      user_name == "homebrew" && formula_name == name
+    end
+    same_name_tap_formulae += @@remote_official_taps.map do |tap|
+      Thread.new { Homebrew.search_tap "homebrew", tap, name }
+    end.map(&:value).flatten
+    same_name_tap_formulae.delete(full_name)
+
+    if same_name_tap_formulae.size > 0
+      problem "Formula name conflicts with #{same_name_tap_formulae.join ", "}"
     end
   end
 
   def audit_deps
-    # Don't depend_on aliases; use full name
-    @@aliases ||= Formula.aliases
-    f.deps.select { |d| @@aliases.include? d.name }.each do |d|
-      problem "Dependency #{d} is an alias; use the canonical name."
-    end
+    @specs.each do |spec|
+      # Check for things we don't like to depend on.
+      # We allow non-Homebrew installs whenever possible.
+      spec.deps.each do |dep|
+        begin
+          dep_f = dep.to_formula
+        rescue TapFormulaUnavailableError
+          # Don't complain about missing cross-tap dependencies
+          next
+        rescue FormulaUnavailableError
+          problem "Can't find dependency #{dep.name.inspect}."
+          next
+        rescue TapFormulaAmbiguityError
+          problem "Ambiguous dependency #{dep.name.inspect}."
+          next
+        end
 
-    # Check for things we don't like to depend on.
-    # We allow non-Homebrew installs whenever possible.
-    f.deps.each do |dep|
-      begin
-        dep_f = dep.to_formula
-      rescue FormulaUnavailableError
-        problem "Can't find dependency #{dep.name.inspect}."
-        next
-      end
+        if @@aliases.include?(dep.name)
+          problem "Dependency '#{dep.name}' is an alias; use the canonical name '#{dep.to_formula.full_name}'."
+        end
 
-      dep.options.reject do |opt|
-        # TODO -- fix for :recommended, should still allow --with-xyz
-        dep_f.build.has_option?(opt.name)
-      end.each do |opt|
-        problem "Dependency #{dep} does not define option #{opt.name.inspect}"
-      end
+        dep.options.reject do |opt|
+          next true if dep_f.option_defined?(opt)
+          dep_f.requirements.detect do |r|
+            if r.recommended?
+              opt.name == "with-#{r.name}"
+            elsif r.optional?
+              opt.name == "without-#{r.name}"
+            end
+          end
+        end.each do |opt|
+          problem "Dependency #{dep} does not define option #{opt.name.inspect}"
+        end
 
-      case dep.name
-      when *BUILD_TIME_DEPS
-        next if dep.build?
-        next if dep.name == 'autoconf' && f.name =~ /automake/
-        next if dep.name == 'libtool' && %w{imagemagick libgphoto2 libp11}.any? { |n| f.name == n }
-        next if dep.name =~ /autoconf|pkg-config/ && f.name == 'ruby-build'
-
-        problem %{#{dep} dependency should be "depends_on '#{dep}' => :build"}
-      when "git", "ruby", "emacs", "mercurial"
-        problem <<-EOS.undent
-          Don't use #{dep} as a dependency. We allow non-Homebrew
-          #{dep} installations.
+        case dep.name
+        when *BUILD_TIME_DEPS
+          next if dep.build? or dep.run?
+          problem <<-EOS.undent
+            #{dep} dependency should be
+              depends_on "#{dep}" => :build
+            Or if it is indeed a runtime denpendency
+              depends_on "#{dep}" => :run
           EOS
-      when 'python', 'python2', 'python3'
-        problem <<-EOS.undent
-          Don't use #{dep} as a dependency (string).
-             We have special `depends_on :python` (or :python2 or :python3 )
-             that works with brewed and system Python and allows us to support
-             bindings for 2.x and 3.x in parallel and much more.
-          EOS
-      when 'gfortran'
-        problem "Use `depends_on :fortran` instead of `depends_on 'gfortran'`"
-      when 'open-mpi', 'mpich2'
-        problem <<-EOS.undent
-          There are multiple conflicting ways to install MPI. Use an MPIDependency:
-            depends_on :mpi => [<lang list>]
-          Where <lang list> is a comma delimited list that can include:
-            :cc, :cxx, :f77, :f90
-          EOS
+        when "git"
+          problem "Don't use git as a dependency"
+        when "mercurial"
+          problem "Use `depends_on :hg` instead of `depends_on 'mercurial'`"
+        when "ruby"
+          problem "Don't use ruby as a dependency. We allow non-Homebrew ruby installations."
+        when "gfortran"
+          problem "Use `depends_on :fortran` instead of `depends_on 'gfortran'`"
+        when "open-mpi", "mpich2"
+          problem <<-EOS.undent
+            There are multiple conflicting ways to install MPI. Use an MPIRequirement:
+              depends_on :mpi => [<lang list>]
+            Where <lang list> is a comma delimited list that can include:
+              :cc, :cxx, :f77, :f90
+            EOS
+        end
       end
     end
   end
 
   def audit_conflicts
-    f.conflicts.each do |c|
+    formula.conflicts.each do |c|
       begin
-        Formula.factory(c.name)
+        Formulary.factory(c.name)
+      rescue TapFormulaUnavailableError
+        # Don't complain about missing cross-tap conflicts.
+        next
       rescue FormulaUnavailableError
         problem "Can't find conflicting formula #{c.name.inspect}."
+      rescue TapFormulaAmbiguityError
+        problem "Ambiguous conflicting formula #{c.name.inspect}."
       end
     end
   end
 
-  def audit_urls
-    unless f.homepage =~ %r[^https?://]
-      problem "The homepage should start with http or https (url is #{f.homepage})."
+  def audit_options
+    formula.options.each do |o|
+      next unless @strict
+      if o.name !~ /with(out)?-/ && o.name != "c++11" && o.name != "universal" && o.name != "32-bit"
+        problem "Options should begin with with/without. Migrate '--#{o.name}' with `deprecated_option`."
+      end
+    end
+  end
+
+  def audit_desc
+    # For now, only check the description when using `--strict`
+    return unless @strict
+
+    desc = formula.desc
+
+    unless desc and desc.length > 0
+      problem "Formula should have a desc (Description)."
+      return
+    end
+
+    # Make sure the formula name plus description is no longer than 80 characters
+    linelength = formula.full_name.length + ": ".length + desc.length
+    if linelength > 80
+      problem "Description is too long. \"name: desc\" should be less than 80 characters (currently #{linelength})."
+    end
+
+    if desc =~ %r[[Cc]ommandline]
+      problem "It should be \"command-line\", not \"commandline\"."
+    end
+
+    if desc =~ %r[[Cc]ommand line]
+      problem "It should be \"command-line\", not \"command line\"."
+    end
+  end
+
+  def audit_homepage
+    homepage = formula.homepage
+
+    unless homepage =~ %r[^https?://]
+      problem "The homepage should start with http or https (URL is #{homepage})."
     end
 
     # Check for http:// GitHub homepage urls, https:// is preferred.
     # Note: only check homepages that are repo pages, not *.github.com hosts
-    if f.homepage =~ %r[^http://github\.com/]
-      problem "Use https:// URLs for homepages on GitHub (url is #{f.homepage})."
+    if homepage =~ %r[^http://github\.com/]
+      problem "Please use https:// for #{homepage}"
+    end
+
+    # Savannah has full SSL/TLS support but no auto-redirect.
+    # Doesn't apply to the download URLs, only the homepage.
+    if homepage =~ %r[^http://savannah\.nongnu\.org/]
+      problem "Please use https:// for #{homepage}"
+    end
+
+    # Freedesktop is complicated to handle - It has SSL/TLS, but only on certain subdomains.
+    # To enable https Freedesktop change the URL from http://project.freedesktop.org/wiki to
+    # https://wiki.freedesktop.org/project_name.
+    # "Software" is redirected to https://wiki.freedesktop.org/www/Software/project_name
+    if homepage =~ %r[^http://((?:www|nice|libopenraw|liboil|telepathy|xorg)\.)?freedesktop\.org/(?:wiki/)?]
+      if homepage =~ /Software/
+        problem "#{homepage} should be styled `https://wiki.freedesktop.org/www/Software/project_name`"
+      else
+        problem "#{homepage} should be styled `https://wiki.freedesktop.org/project_name`"
+      end
     end
 
     # Google Code homepages should end in a slash
-    if f.homepage =~ %r[^https?://code\.google\.com/p/[^/]+[^/]$]
-      problem "Google Code homepage should end with a slash (url is #{f.homepage})."
+    if homepage =~ %r[^https?://code\.google\.com/p/[^/]+[^/]$]
+      problem "#{homepage} should end with a slash"
     end
 
-    urls = @specs.map(&:url)
-
-    # Check GNU urls; doesn't apply to mirrors
-    urls.grep(%r[^(?:https?|ftp)://(?!alpha).+/gnu/]) do |u|
-      problem "\"ftpmirror.gnu.org\" is preferred for GNU software (url is #{u})."
+    # People will run into mixed content sometimes, but we should enforce and then add
+    # exemptions as they are discovered. Treat mixed content on homepages as a bug.
+    # Justify each exemptions with a code comment so we can keep track here.
+    if homepage =~ %r[^http://[^/]*github\.io/]
+      problem "Please use https:// for #{homepage}"
     end
 
-    # the rest of the checks apply to mirrors as well
-    urls.concat(@specs.map(&:mirrors).flatten)
-
-    # Check SourceForge urls
-    urls.each do |p|
-      # Skip if the URL looks like a SVN repo
-      next if p =~ %r[/svnroot/]
-      next if p =~ %r[svn\.sourceforge]
-
-      # Is it a sourceforge http(s) URL?
-      next unless p =~ %r[^https?://.*\bsourceforge\.]
-
-      if p =~ /(\?|&)use_mirror=/
-        problem "Don't use #{$1}use_mirror in SourceForge urls (url is #{p})."
-      end
-
-      if p =~ /\/download$/
-        problem "Don't use /download in SourceForge urls (url is #{p})."
-      end
-
-      if p =~ %r[^https?://sourceforge\.]
-        problem "Use http://downloads.sourceforge.net to get geolocation (url is #{p})."
-      end
-
-      if p =~ %r[^https?://prdownloads\.]
-        problem "Don't use prdownloads in SourceForge urls (url is #{p}).\n" +
-                "\tSee: http://librelist.com/browser/homebrew/2011/1/12/prdownloads-is-bad/"
-      end
-
-      if p =~ %r[^http://\w+\.dl\.]
-        problem "Don't use specific dl mirrors in SourceForge urls (url is #{p})."
-      end
+    # There's an auto-redirect here, but this mistake is incredibly common too.
+    # Only applies to the homepage and subdomains for now, not the FTP URLs.
+    if homepage =~ %r[^http://((?:build|cloud|developer|download|extensions|git|glade|help|library|live|nagios|news|people|projects|rt|static|wiki|www)\.)?gnome\.org]
+      problem "Please use https:// for #{homepage}"
     end
 
-    # Check for git:// GitHub repo urls, https:// is preferred.
-    urls.grep(%r[^git://[^/]*github\.com/]) do |u|
-      problem "Use https:// URLs for accessing GitHub repositories (url is #{u})."
+    # Compact the above into this list as we're able to remove detailed notations, etc over time.
+    case homepage
+    when %r[^http://[^/]*\.apache\.org],
+         %r[^http://packages\.debian\.org],
+         %r[^http://wiki\.freedesktop\.org/],
+         %r[^http://((?:www)\.)?gnupg.org/],
+         %r[^http://ietf\.org],
+         %r[^http://[^/.]+\.ietf\.org],
+         %r[^http://[^/.]+\.tools\.ietf\.org],
+         %r[^http://www\.gnu\.org/],
+         %r[^http://code\.google\.com/]
+      problem "Please use https:// for #{homepage}"
+    end
+  end
+
+  def audit_github_repository
+    return unless @strict
+
+    regex = %r{https?://github.com/([^/]+)/([^/]+)/?.*}
+    _, user, repo = *regex.match(formula.stable.url)
+    _, user, repo = *regex.match(formula.homepage) unless user
+    return if !user || !repo
+
+    repo.gsub!(/.git$/, "")
+
+    begin
+      metadata = GitHub.repository(user, repo)
+    rescue GitHub::HTTPNotFoundError
+      return
     end
 
-    # Check for http:// GitHub repo urls, https:// is preferred.
-    urls.grep(%r[^http://github\.com/.*\.git$]) do |u|
-      problem "Use https:// URLs for accessing GitHub repositories (url is #{u})."
+    problem "GitHub fork (not canonical repository)" if metadata["fork"]
+    if (metadata["forks_count"] < 10) && (metadata["watchers_count"] < 10) &&
+       (metadata["stargazers_count"] < 20)
+      problem "GitHub repository not notable enough (<10 forks, <10 watchers and <20 stars)"
     end
 
-    # Use new-style archive downloads
-    urls.select { |u| u =~ %r[https://.*/(?:tar|zip)ball/] && u !~ %r[\.git$] }.each do |u|
-      problem "Use /archive/ URLs for GitHub tarballs (url is #{u})."
-    end
-
-    if urls.any? { |u| u =~ /\.xz/ } && !f.deps.any? { |d| d.name == "xz" }
-      problem "Missing a build-time dependency on 'xz'"
+    if (Date.parse(metadata["created_at"]) > (Date.today - 30))
+      problem "GitHub repository too new (<30 days old)"
     end
   end
 
   def audit_specs
-    problem "Head-only (no stable download)" if f.head_only?
+    if head_only?(formula) && formula.tap.to_s.downcase != "homebrew/homebrew-head-only"
+      problem "Head-only (no stable download)"
+    end
 
-    [:stable, :devel].each do |spec|
-      s = f.send(spec)
-      next if s.nil?
+    if devel_only?(formula) && formula.tap.to_s.downcase != "homebrew/homebrew-devel-only"
+      problem "Devel-only (no stable download)"
+    end
 
-      if s.version.to_s.empty?
-        problem "Invalid or missing #{spec} version"
-      else
-        version_text = s.version unless s.version.detected_from_url?
-        version_url = Version.detect(s.url, s.specs)
-        if version_url.to_s == version_text.to_s && s.version.instance_of?(Version)
-          problem "#{spec} version #{version_text} is redundant with version scanned from URL"
-        end
+    %w[Stable Devel HEAD].each do |name|
+      next unless spec = formula.send(name.downcase)
+
+      ra = ResourceAuditor.new(spec).audit
+      problems.concat ra.problems.map { |problem| "#{name}: #{problem}" }
+
+      spec.resources.each_value do |resource|
+        ra = ResourceAuditor.new(resource).audit
+        problems.concat ra.problems.map { |problem|
+          "#{name} resource #{resource.name.inspect}: #{problem}"
+        }
       end
 
-      if s.version.to_s =~ /^v/
-        problem "#{spec} version #{s.version} should not have a leading 'v'"
-      end
+      spec.patches.select(&:external?).each { |p| audit_patch(p) }
+    end
 
-      cksum = s.checksum
-      next if cksum.nil?
-
-      case cksum.hash_type
-      when :md5
-        problem "md5 checksums are deprecated, please use sha1 or sha256"
-        next
-      when :sha1   then len = 40
-      when :sha256 then len = 64
-      end
-
-      if cksum.empty?
-        problem "#{cksum.hash_type} is empty"
-      else
-        problem "#{cksum.hash_type} should be #{len} characters" unless cksum.hexdigest.length == len
-        problem "#{cksum.hash_type} contains invalid characters" unless cksum.hexdigest =~ /^[a-fA-F0-9]+$/
-        problem "#{cksum.hash_type} should be lowercase" unless cksum.hexdigest == cksum.hexdigest.downcase
+    %w[Stable Devel].each do |name|
+      next unless spec = formula.send(name.downcase)
+      version = spec.version
+      if version.to_s !~ /\d/
+        problem "#{name}: version (#{version}) is set to a string without a digit"
       end
     end
 
-    # Check for :using that is already detected from the url
-    @specs.each do |s|
-      next if s.using.nil?
+    if formula.stable && formula.devel
+      if formula.devel.version < formula.stable.version
+        problem "devel version #{formula.devel.version} is older than stable version #{formula.stable.version}"
+      elsif formula.devel.version == formula.stable.version
+        problem "stable and devel versions are identical"
+      end
+    end
 
-      url_strategy = DownloadStrategyDetector.detect(s.url)
-      using_strategy = DownloadStrategyDetector.detect('', s.using)
+    stable = formula.stable
+    case stable && stable.url
+    when %r{download\.gnome\.org/sources}, %r{ftp\.gnome\.org/pub/GNOME/sources}i
+      minor_version = Version.parse(stable.url).to_s.split(".", 3)[1].to_i
 
-      problem "redundant :using specification in url or head" if url_strategy == using_strategy
+      if minor_version.odd?
+        problem "#{stable.version} is a development release"
+      end
     end
   end
 
   def audit_patches
-    Patches.new(f.patches).select(&:external?).each do |p|
-      case p.url
-      when %r[raw\.github\.com], %r[gist\.github\.com/raw]
-        unless p.url =~ /[a-fA-F0-9]{40}/
-          problem "GitHub/Gist patches should specify a revision:\n#{p.url}"
-        end
-      when %r[macports/trunk]
-        problem "MacPorts patches should specify a revision instead of trunk:\n#{p.url}"
+    legacy_patches = Patch.normalize_legacy_patches(formula.patches).grep(LegacyPatch)
+    if legacy_patches.any?
+      problem "Use the patch DSL instead of defining a 'patches' method"
+      legacy_patches.each { |p| audit_patch(p) }
+    end
+  end
+
+  def audit_patch(patch)
+    case patch.url
+    when %r[raw\.github\.com], %r[gist\.github\.com/raw], %r[gist\.github\.com/.+/raw],
+      %r[gist\.githubusercontent\.com/.+/raw]
+      unless patch.url =~ /[a-fA-F0-9]{40}/
+        problem "GitHub/Gist patches should specify a revision:\n#{patch.url}"
       end
+    when %r[macports/trunk]
+      problem "MacPorts patches should specify a revision instead of trunk:\n#{patch.url}"
+    when %r[^http://trac\.macports\.org]
+      problem "Patches from MacPorts Trac should be https://, not http:\n#{patch.url}"
+    when %r[^http://bugs\.debian\.org]
+      problem "Patches from Debian should be https://, not http:\n#{patch.url}"
     end
   end
 
   def audit_text
-    if text =~ /system\s+['"]xcodebuild/ && text !~ /SYMROOT=/
-      problem "xcodebuild should be passed an explicit \"SYMROOT\""
+    if text =~ /system\s+['"]scons/
+      problem "use \"scons *args\" instead of \"system 'scons', *args\""
+    end
+
+    if text =~ /system\s+['"]xcodebuild/
+      problem %{use "xcodebuild *args" instead of "system 'xcodebuild', *args"}
+    end
+
+    if text =~ /xcodebuild[ (]["'*]/ && text !~ /SYMROOT=/
+      problem %{xcodebuild should be passed an explicit "SYMROOT"}
+    end
+
+    if text =~ /Formula\.factory\(/
+      problem "\"Formula.factory(name)\" is deprecated in favor of \"Formula[name]\""
+    end
+
+    if text =~ /system "npm", "install"/ && text !~ %r[opt_libexec}/npm/bin]
+      need_npm = "\#{Formula[\"node\"].opt_libexec\}/npm/bin"
+      problem <<-EOS.undent
+       Please add ENV.prepend_path \"PATH\", \"#{need_npm}"\ to def install
+      EOS
+    end
+
+    if text =~ /system "npm", "install"/ && text !~ /"HOME"/
+      problem "Please add ENV[\"HOME\"] = buildpath/\".brew_home\" to def install"
     end
   end
 
-  def audit_line(line)
+  def audit_line(line, lineno)
     if line =~ /<(Formula|AmazonWebServicesFormula|ScriptFileFormula|GithubGistFormula)/
       problem "Use a space in class inheritance: class Foo < #{$1}"
     end
@@ -352,18 +568,31 @@ class FormulaAuditor
     if line =~ /# PLEASE REMOVE/
       problem "Please remove default template comments"
     end
+    if line =~ /# Documentation:/
+      problem "Please remove default template comments"
+    end
     if line =~ /# if this fails, try separate make\/make install steps/
+      problem "Please remove default template comments"
+    end
+    if line =~ /# The URL of the archive/
+      problem "Please remove default template comments"
+    end
+    if line =~ /## Naming --/
       problem "Please remove default template comments"
     end
     if line =~ /# if your formula requires any X11\/XQuartz components/
       problem "Please remove default template comments"
     end
-    if line =~ /# if your formula's build system can't parallelize/
+    if line =~ /# if your formula fails when building in parallel/
+      problem "Please remove default template comments"
+    end
+    if line =~ /# Remove unrecognized options if warned by configure/
       problem "Please remove default template comments"
     end
 
     # FileUtils is included in Formula
-    if line =~ /FileUtils\.(\w+)/
+    # encfs modifies a file with this name, so check for some leading characters
+    if line =~ /[^'"\/]FileUtils\.(\w+)/
       problem "Don't need 'FileUtils.' before #{$1}."
     end
 
@@ -383,8 +612,8 @@ class FormulaAuditor
     end
 
     # Prefer formula path shortcuts in Pathname+
-    if line =~ %r{\(\s*(prefix\s*\+\s*(['"])(bin|include|libexec|lib|sbin|share)[/'"])}
-      problem "\"(#{$1}...#{$2})\" should be \"(#{$3}+...)\""
+    if line =~ %r{\(\s*(prefix\s*\+\s*(['"])(bin|include|libexec|lib|sbin|share|Frameworks)[/'"])}
+      problem "\"(#{$1}...#{$2})\" should be \"(#{$3.downcase}+...)\""
     end
 
     if line =~ %r[((man)\s*\+\s*(['"])(man[1-8])(['"]))]
@@ -392,8 +621,8 @@ class FormulaAuditor
     end
 
     # Prefer formula path shortcuts in strings
-    if line =~ %r[(\#\{prefix\}/(bin|include|libexec|lib|sbin|share))]
-      problem "\"#{$1}\" should be \"\#{#{$2}}\""
+    if line =~ %r[(\#\{prefix\}/(bin|include|libexec|lib|sbin|share|Frameworks))]
+      problem "\"#{$1}\" should be \"\#{#{$2.downcase}}\""
     end
 
     if line =~ %r[((\#\{prefix\}/share/man/|\#\{man\}/)(man[1-8]))]
@@ -408,6 +637,10 @@ class FormulaAuditor
       problem "\"#{$1}\" should be \"\#{#{$2}}\""
     end
 
+    if line =~ %r[depends_on :(automake|autoconf|libtool)]
+      problem ":#{$1} is deprecated. Usage should be \"#{$1}\""
+    end
+
     # Commented-out depends_on
     if line =~ /#\s*depends_on\s+(.+)\s*$/
       problem "Commented-out dep #{$1}"
@@ -415,11 +648,11 @@ class FormulaAuditor
 
     # No trailing whitespace, please
     if line =~ /[\t ]+$/
-      problem "Trailing whitespace was found"
+      problem "#{lineno}: Trailing whitespace was found"
     end
 
     if line =~ /if\s+ARGV\.include\?\s+'--(HEAD|devel)'/
-      problem "Use \"if ARGV.build_#{$1.downcase}?\" instead"
+      problem "Use \"if build.#{$1.downcase}?\" instead"
     end
 
     if line =~ /make && make/
@@ -443,7 +676,7 @@ class FormulaAuditor
       problem "Use \"\#{ENV.cxx}\" instead of hard-coding \"#{$3}\""
     end
 
-    if line =~ /system\s+['"](env|export)/
+    if line =~ /system\s+['"](env|export)(\s+|['"])/
       problem "Use ENV instead of invoking '#{$1}' to modify the environment"
     end
 
@@ -451,26 +684,48 @@ class FormulaAuditor
       problem "Use 'build.head?' instead of inspecting 'version'"
     end
 
-    if line =~ /build\.include\?\s+['"]\-\-(.*)['"]/
+    if line =~ /build\.include\?[\s\(]+['"]\-\-(.*)['"]/
       problem "Reference '#{$1}' without dashes"
     end
 
-    if line =~ /build\.with\?\s+['"]-?-?with-(.*)['"]/
-      problem "No double 'with': Use `build.with? '#{$1}'` to check for \"--with-#{$1}\""
+    if line =~ /build\.include\?[\s\(]+['"]with(out)?-(.*)['"]/
+      problem "Use build.with#{$1}? \"#{$2}\" instead of build.include? 'with#{$1}-#{$2}'"
     end
 
-    if line =~ /build\.without\?\s+['"]-?-?without-(.*)['"]/
-      problem "No double 'without': Use `build.without? '#{$1}'` to check for \"--without-#{$1}\""
+    if line =~ /build\.with\?[\s\(]+['"]-?-?with-(.*)['"]/
+      problem "Don't duplicate 'with': Use `build.with? \"#{$1}\"` to check for \"--with-#{$1}\""
     end
 
-    unless f.name == 'mongodb' # Mongo writes out a Ruby script that uses ARGV
-      if line =~ /ARGV\.(?!(debug\?|verbose\?|value[\(\s]))/
-        problem "Use build instead of ARGV to check options"
-      end
+    if line =~ /build\.without\?[\s\(]+['"]-?-?without-(.*)['"]/
+      problem "Don't duplicate 'without': Use `build.without? \"#{$1}\"` to check for \"--without-#{$1}\""
+    end
+
+    if line =~ /unless build\.with\?(.*)/
+      problem "Use if build.without?#{$1} instead of unless build.with?#{$1}"
+    end
+
+    if line =~ /unless build\.without\?(.*)/
+      problem "Use if build.with?#{$1} instead of unless build.without?#{$1}"
+    end
+
+    if line =~ /(not\s|!)\s*build\.with?\?/
+      problem "Don't negate 'build.without?': use 'build.with?'"
+    end
+
+    if line =~ /(not\s|!)\s*build\.without?\?/
+      problem "Don't negate 'build.with?': use 'build.without?'"
+    end
+
+    if line =~ /ARGV\.(?!(debug\?|verbose\?|value[\(\s]))/
+      problem "Use build instead of ARGV to check options"
     end
 
     if line =~ /def options/
       problem "Use new-style option definitions"
+    end
+
+    if line =~ /def test$/
+      problem "Use new-style test definitions (test do)"
     end
 
     if line =~ /MACOS_VERSION/
@@ -483,7 +738,8 @@ class FormulaAuditor
     end
 
     if line =~ /skip_clean\s+:all/
-      problem "`skip_clean :all` is deprecated; brew no longer strips symbols"
+      problem "`skip_clean :all` is deprecated; brew no longer strips symbols\n" +
+              "\tPass explicit paths to prevent Homebrew from removing empty folders."
     end
 
     if line =~ /depends_on [A-Z][\w:]+\.new$/
@@ -494,8 +750,12 @@ class FormulaAuditor
       problem "Define method #{$1.inspect} in the class body, not at the top-level"
     end
 
-    if line =~ /ENV.fortran/
+    if line =~ /ENV.fortran/ && !formula.requirements.map(&:class).include?(FortranRequirement)
       problem "Use `depends_on :fortran` instead of `ENV.fortran`"
+    end
+
+    if line =~ /JAVA_HOME/i && !formula.requirements.map(&:class).include?(JavaRequirement)
+      problem "Use `depends_on :java` to set JAVA_HOME"
     end
 
     if line =~ /depends_on :(.+) (if.+|unless.+)$/
@@ -505,6 +765,70 @@ class FormulaAuditor
     if line =~ /depends_on ['"](.+)['"] (if.+|unless.+)$/
       audit_conditional_dep($1, $2, $&)
     end
+
+    if line =~ /(Dir\[("[^\*{},]+")\])/
+      problem "#{$1} is unnecessary; just use #{$2}"
+    end
+
+    if line =~ /system (["'](#{FILEUTILS_METHODS})["' ])/o
+      system = $1
+      method = $2
+      problem "Use the `#{method}` Ruby method instead of `system #{system}`"
+    end
+
+    if @strict
+      if line =~ /system (["'][^"' ]*(?:\s[^"' ]*)+["'])/
+        bad_system = $1
+        unless %w[| < > & ; *].any? { |c| bad_system.include? c }
+          good_system = bad_system.gsub(" ", "\", \"")
+          problem "Use `system #{good_system}` instead of `system #{bad_system}` "
+        end
+      end
+
+      if line =~ /(require ["']formula["'])/
+        problem "`#{$1}` is now unnecessary"
+      end
+    end
+  end
+
+  def audit_caveats
+    caveats = formula.caveats
+
+    if caveats =~ /setuid/
+      problem "Don't recommend setuid in the caveats, suggest sudo instead."
+    end
+  end
+
+  def audit_reverse_migration
+    # Only enforce for new formula being re-added to core
+    return unless @strict
+    return unless formula.core_formula?
+
+    if TAP_MIGRATIONS.has_key?(formula.name)
+      problem <<-EOS.undent
+       #{formula.name} seems to be listed in tap_migrations.rb!
+       Please remove #{formula.name} from present tap & tap_migrations.rb
+       before submitting it to Homebrew/homebrew.
+      EOS
+    end
+  end
+
+  def audit_prefix_has_contents
+    return unless formula.prefix.directory?
+
+    Pathname.glob("#{formula.prefix}/**/*") do |file|
+      next if file.directory?
+      basename = file.basename.to_s
+      next if Metafiles.copy?(basename)
+      next if %w[.DS_Store INSTALL_RECEIPT.json].include?(basename)
+      return
+    end
+
+    problem <<-EOS.undent
+      The installation seems to be empty. Please ensure the prefix
+      is set correctly and expected files are installed.
+      The prefix configure/make argument may be case-sensitive.
+    EOS
   end
 
   def audit_conditional_dep(dep, condition, line)
@@ -523,108 +847,272 @@ class FormulaAuditor
     Symbol === dep ? dep.inspect : "'#{dep}'"
   end
 
-  def audit_python
-    if text =~ /(def\s*)?which_python/
-      problem "Replace `which_python` by `python.xy`, which returns e.g. 'python2.7'"
-    end
-
-    if text =~ /which\(?["']python/
-      problem "Don't locate python with `which 'python'`, use `python.binary` instead"
-    end
-
-    if text =~ /LanguageModuleDependency.new\s?\(\s?:python/
-      problem <<-EOS.undent
-        Python: Replace `LanguageModuleDependency.new(:python,'PyPi-name','module')`
-           by the new `depends_on :python => ['module' => 'PyPi-name']`
-      EOS
-    end
-
-    # Checks that apply only to code in def install
-    if text =~ /(\s*)def\s+install((.*\n)*?)(\1end)/
-      install_body = $2
-
-      if install_body =~ /system\(?\s*['"]python/
-        problem "Instead of `system 'python', ...`, call `system python, ...`"
-      end
-
-      if text =~ /system\(?\s*python\.binary/
-        problem "Instead of `system python.binary, ...`, call `system python, ...`"
-      end
-    end
-
-    # Checks that apply only to code in def caveats
-    if text =~ /(\s*)def\s+caveats((.*\n)*?)(\1end)/ || text =~ /(\s*)def\s+caveats;(.*?)end/
-      caveats_body = $2
-      if caveats_body =~ /[ \{=](python[23]?)\.(.*\w)/
-        # So if in the body of caveats there is a `python.whatever` called,
-        # check that there is a guard like `if python` or similiar:
-        python = $1
-        method = $2
-        unless caveats_body =~ /(if python[23]?)|(if build\.with\?\s?\(?['"]python)|(unless build.without\?\s?\(?['"]python)/
-          problem "Please guard `#{python}.#{method}` like so `#{python}.#{method} if #{python}`"
-        end
-      end
-    end
-
-    if f.requirements.any?{ |r| r.kind_of?(PythonInstalled) }
-      # Don't check this for all formulae, because some are allowed to set the
-      # PYTHONPATH. E.g. python.rb itself needs to set it.
-      if text =~ /ENV\.append.*PYTHONPATH/ || text =~ /ENV\[['"]PYTHONPATH['"]\]\s*=[^=]/
-        problem "Don't set the PYTHONPATH, instead declare `depends_on :python`"
-      end
-    else
-      # So if there is no PythonInstalled requirement, we can check if the
-      # formula still uses python and should add a `depends_on :python`
-      unless f.name.to_s =~ /(pypy[0-9]*)|(python[0-9]*)/
-        if text =~ /system.["' ]?python([0-9"'])?/
-          problem "If the formula uses Python, it should declare so by `depends_on :python#{$1}`"
-        end
-        if text =~ /setup\.py/
-          problem <<-EOS.undent
-            If the formula installs Python bindings you should declare `depends_on :python[3]`"
-          EOS
-        end
-      end
-    end
-
-    # Todo:
-    # The python do ... end block is possibly executed twice. Once for
-    # python 2.x and once for 3.x. So if a `system 'make'` is called, a
-    # `system 'make clean'` should also be called at the end of the block.
-
-  end
-
-  def audit_check_output warning_and_description
-    return unless warning_and_description
-    warning, _ = *warning_and_description
-    problem warning
-  end
-
-  def audit_installed
-    audit_check_output(check_manpages)
-    audit_check_output(check_infopages)
-    audit_check_output(check_jars)
-    audit_check_output(check_non_libraries)
-    audit_check_output(check_non_executables(f.bin))
-    audit_check_output(check_non_executables(f.sbin))
+  def audit_check_output(output)
+    problem(output) if output
   end
 
   def audit
     audit_file
+    audit_formula_name
+    audit_class
     audit_specs
-    audit_urls
+    audit_desc
+    audit_homepage
+    audit_github_repository
     audit_deps
     audit_conflicts
+    audit_options
     audit_patches
     audit_text
-    text.each_line { |line| audit_line(line) }
-    audit_python
+    audit_caveats
+    text.without_patch.split("\n").each_with_index { |line, lineno| audit_line(line, lineno+1) }
     audit_installed
+    audit_prefix_has_contents
+    audit_reverse_migration
   end
 
   private
 
   def problem p
     @problems << p
+  end
+
+  def head_only?(formula)
+    formula.head && formula.devel.nil? && formula.stable.nil?
+  end
+
+  def devel_only?(formula)
+    formula.devel && formula.stable.nil?
+  end
+end
+
+class ResourceAuditor
+  attr_reader :problems
+  attr_reader :version, :checksum, :using, :specs, :url, :mirrors, :name
+
+  def initialize(resource)
+    @name     = resource.name
+    @version  = resource.version
+    @checksum = resource.checksum
+    @url      = resource.url
+    @mirrors  = resource.mirrors
+    @using    = resource.using
+    @specs    = resource.specs
+    @problems = []
+  end
+
+  def audit
+    audit_version
+    audit_checksum
+    audit_download_strategy
+    audit_urls
+    self
+  end
+
+  def audit_version
+    if version.nil?
+      problem "missing version"
+    elsif version.to_s.empty?
+      problem "version is set to an empty string"
+    elsif not version.detected_from_url?
+      version_text = version
+      version_url = Version.detect(url, specs)
+      if version_url.to_s == version_text.to_s && version.instance_of?(Version)
+        problem "version #{version_text} is redundant with version scanned from URL"
+      end
+    end
+
+    if version.to_s =~ /^v/
+      problem "version #{version} should not have a leading 'v'"
+    end
+
+    if version.to_s =~ /_\d+$/
+      problem "version #{version} should not end with an underline and a number"
+    end
+  end
+
+  def audit_checksum
+    return unless checksum
+
+    case checksum.hash_type
+    when :md5
+      problem "MD5 checksums are deprecated, please use SHA256"
+      return
+    when :sha1
+      if ARGV.include? "--strict"
+        problem "SHA1 checksums are deprecated, please use SHA256"
+        return
+      else
+        len = 40
+      end
+    when :sha256 then len = 64
+    end
+
+    if checksum.empty?
+      problem "#{checksum.hash_type} is empty"
+    else
+      problem "#{checksum.hash_type} should be #{len} characters" unless checksum.hexdigest.length == len
+      problem "#{checksum.hash_type} contains invalid characters" unless checksum.hexdigest =~ /^[a-fA-F0-9]+$/
+      problem "#{checksum.hash_type} should be lowercase" unless checksum.hexdigest == checksum.hexdigest.downcase
+    end
+  end
+
+  def audit_download_strategy
+    if url =~ %r[^(cvs|bzr|hg|fossil)://] || url =~ %r[^(svn)\+http://]
+      problem "Use of the #{$&} scheme is deprecated, pass `:using => :#{$1}` instead"
+    end
+
+    url_strategy = DownloadStrategyDetector.detect(url)
+
+    if using == :git || url_strategy == GitDownloadStrategy
+      if specs[:tag] && !specs[:revision]
+        problem "Git should specify :revision when a :tag is specified."
+      end
+    end
+
+    return unless using
+
+    if using == :ssl3 || using == CurlSSL3DownloadStrategy
+      problem "The SSL3 download strategy is deprecated, please choose a different URL"
+    elsif using == CurlUnsafeDownloadStrategy || using == UnsafeSubversionDownloadStrategy
+      problem "#{using.name} is deprecated, please choose a different URL"
+    end
+
+    if using == :cvs
+      mod = specs[:module]
+
+      if mod == name
+        problem "Redundant :module value in URL"
+      end
+
+      if url =~ %r[:[^/]+$]
+        mod = url.split(":").last
+
+        if mod == name
+          problem "Redundant CVS module appended to URL"
+        else
+          problem "Specify CVS module as `:module => \"#{mod}\"` instead of appending it to the URL"
+        end
+      end
+    end
+
+    using_strategy = DownloadStrategyDetector.detect('', using)
+
+    if url_strategy == using_strategy
+      problem "Redundant :using value in URL"
+    end
+  end
+
+  def audit_urls
+    # Check GNU urls; doesn't apply to mirrors
+    if url =~ %r[^(?:https?|ftp)://(?!alpha).+/gnu/]
+      problem "Please use \"http://ftpmirror.gnu.org\" instead of #{url}."
+    end
+
+    # GNU's ftpmirror does NOT support SSL/TLS.
+    if url =~ %r[^https://ftpmirror\.gnu\.org/]
+      problem "Please use http:// for #{url}"
+    end
+
+    if mirrors.include?(url)
+      problem "URL should not be duplicated as a mirror: #{url}"
+    end
+
+    urls = [url] + mirrors
+
+    # Check a variety of SSL/TLS URLs that don't consistently auto-redirect
+    # or are overly common errors that need to be reduced & fixed over time.
+    urls.each do |p|
+      case p
+      when %r[^http://ftp\.gnu\.org/],
+           %r[^http://[^/]*\.apache\.org/],
+           %r[^http://code\.google\.com/],
+           %r[^http://fossies\.org/],
+           %r[^http://mirrors\.kernel\.org/],
+           %r[^http://([^/]*\.|)bintray\.com/],
+           %r[^http://tools\.ietf\.org/]
+        problem "Please use https:// for #{p}"
+      when %r[^http://search\.mcpan\.org/CPAN/(.*)]i
+        problem "#{p} should be `https://cpan.metacpan.org/#{$1}`"
+      when %r[^(http|ftp)://ftp\.gnome\.org/pub/gnome/(.*)]i
+        problem "#{p} should be `https://download.gnome.org/#{$2}`"
+      end
+    end
+
+    # Check SourceForge urls
+    urls.each do |p|
+      # Skip if the URL looks like a SVN repo
+      next if p =~ %r[/svnroot/]
+      next if p =~ %r[svn\.sourceforge]
+
+      # Is it a sourceforge http(s) URL?
+      next unless p =~ %r[^https?://.*\b(sourceforge|sf)\.(com|net)]
+
+      if p =~ /(\?|&)use_mirror=/
+        problem "Don't use #{$1}use_mirror in SourceForge urls (url is #{p})."
+      end
+
+      if p =~ /\/download$/
+        problem "Don't use /download in SourceForge urls (url is #{p})."
+      end
+
+      if p =~ %r[^https?://sourceforge\.]
+        problem "Use https://downloads.sourceforge.net to get geolocation (url is #{p})."
+      end
+
+      if p =~ %r[^https?://prdownloads\.]
+        problem "Don't use prdownloads in SourceForge urls (url is #{p}).\n" +
+                "\tSee: http://librelist.com/browser/homebrew/2011/1/12/prdownloads-is-bad/"
+      end
+
+      if p =~ %r[^http://\w+\.dl\.]
+        problem "Don't use specific dl mirrors in SourceForge urls (url is #{p})."
+      end
+
+      if p.start_with? "http://downloads"
+        problem "Please use https:// for #{p}"
+      end
+    end
+
+    # Check for Google Code download urls, https:// is preferred
+    # Intentionally not extending this to SVN repositories due to certificate
+    # issues.
+    urls.grep(%r[^http://.*\.googlecode\.com/files.*]) do |u|
+      problem "Please use https:// for #{u}"
+    end
+
+    # Check for new-url Google Code download urls, https:// is preferred
+    urls.grep(%r[^http://code\.google\.com/]) do |u|
+      problem "Please use https:// for #{u}"
+    end
+
+    # Check for git:// GitHub repo urls, https:// is preferred.
+    urls.grep(%r[^git://[^/]*github\.com/]) do |u|
+      problem "Please use https:// for #{u}"
+    end
+
+    # Check for git:// Gitorious repo urls, https:// is preferred.
+    urls.grep(%r[^git://[^/]*gitorious\.org/]) do |u|
+      problem "Please use https:// for #{u}"
+    end
+
+    # Check for http:// GitHub repo urls, https:// is preferred.
+    urls.grep(%r[^http://github\.com/.*\.git$]) do |u|
+      problem "Please use https:// for #{u}"
+    end
+
+    # Use new-style archive downloads
+    urls.select { |u| u =~ %r[https://.*github.*/(?:tar|zip)ball/] && u !~ %r[\.git$] }.each do |u|
+      problem "Use /archive/ URLs for GitHub tarballs (url is #{u})."
+    end
+
+    # Don't use GitHub .zip files
+    urls.select { |u| u =~ %r[https://.*github.*/(archive|releases)/.*\.zip$] && u !~ %r[releases/download] }.each do |u|
+      problem "Use GitHub tarballs rather than zipballs (url is #{u})."
+    end
+  end
+
+  def problem text
+    @problems << text
   end
 end

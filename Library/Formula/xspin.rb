@@ -1,6 +1,7 @@
 require 'formula'
 
 class Xspin < Formula
+  desc "Software verification tool (developed at Bell Labs)"
   homepage 'http://spinroot.com/spin/Src/index.html'
   url 'http://spinroot.com/spin/Src/xspin525.tcl'
   version '5.2.5'
@@ -8,9 +9,7 @@ class Xspin < Formula
 
   depends_on 'spin'
 
-  def patches
-    DATA
-  end
+  patch :DATA
 
   def install
     inreplace "xspin525.tcl", "CELLAR", prefix

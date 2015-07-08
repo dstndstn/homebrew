@@ -1,6 +1,7 @@
 require 'formula'
 
 class Fcgi < Formula
+  desc "Protocol for interfacing interactive programs with a web server"
   homepage 'http://www.fastcgi.com/'
   url 'http://www.fastcgi.com/dist/fcgi-2.4.0.tar.gz'
   sha1 '2329404159e8b8315e524b9eaf1de763202c6e6a'
@@ -9,9 +10,7 @@ class Fcgi < Formula
   # Affects programs linking this library. Reported at
   # http://mailman.fastcgi.com/pipermail/fastcgi-developers/2009-January/000152.html
   # https://trac.macports.org/browser/trunk/dports/www/fcgi/files/patch-libfcgi-fcgi_stdio.c.diff
-  def patches
-    DATA
-  end
+  patch :DATA
 
   def install
     system "./configure", "--disable-debug", "--disable-dependency-tracking",
